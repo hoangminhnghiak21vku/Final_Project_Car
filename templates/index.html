@@ -50,6 +50,11 @@
                             <div class="ai-overlay" id="aiOverlay">
                                 <span class="overlay-tag">AI Detection Active</span>
                             </div>
+                            <!-- Target Tracking Overlay -->
+                            <div class="target-overlay" id="targetOverlay" style="display: none;">
+                                <div class="target-box" id="targetBox"></div>
+                                <div class="target-label" id="targetLabel">Target: Red</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -84,14 +89,38 @@
                             </div>
                         </div>
 
-                        <div class="status-item">
-                            <div class="status-label">Temperature</div>
-                            <div class="status-value" id="tempValue">52°C</div>
+                        <!-- NEW: Target Distance -->
+                        <div class="status-item" id="targetDistanceItem" style="display: none;">
+                            <div class="status-label">
+                                <i class="fas fa-bullseye"></i>
+                                Target Distance
+                            </div>
+                            <div class="status-value" id="targetDistanceValue">-- cm</div>
+                        </div>
+
+                        <!-- NEW: Tracking Status -->
+                        <div class="status-item" id="trackingStatusItem" style="display: none;">
+                            <div class="status-label">
+                                <i class="fas fa-crosshairs"></i>
+                                Tracking
+                            </div>
+                            <div class="status-value" id="trackingStatusValue">
+                                <span class="tracking-badge tracking-lost">Lost Target</span>
+                            </div>
+                        </div>
+
+                        <!-- NEW: Detection Confidence -->
+                        <div class="status-item" id="confidenceItem" style="display: none;">
+                            <div class="status-label">Confidence</div>
+                            <div class="progress-container confidence">
+                                <div class="progress-bar" id="confidenceBar" style="width: 0%"></div>
+                                <span class="progress-text" id="confidenceValue">0%</span>
+                            </div>
                         </div>
 
                         <div class="status-item">
                             <div class="status-label">Uptime</div>
-                            <div class="status-value" id="uptimeValue">1h 23m</div>
+                            <div class="status-value" id="uptimeValue">0h 0m</div>
                         </div>
                     </div>
                 </div>
@@ -100,7 +129,7 @@
             <!-- Row 2: Manual Control -->
             <div class="panel control-panel">
                 <div class="panel-header">
-                    <i class="fas fa-gamepad"></i> MANUAL CONTROL
+                    <i class="fas fa-gamepad"></i> CONTROL CENTER
                 </div>
                 <div class="panel-body control-body">
                     <div class="control-left">
@@ -124,26 +153,55 @@
                     </div>
 
                     <div class="control-right">
+                        <!-- Mode Selection -->
                         <div class="control-item">
-                            <label>Speed:</label>
-                            <input type="range" class="speed-slider" id="speedSlider" min="0" max="255" value="180">
-                            <span id="speedDisplay">180</span>
-                        </div>
-
-                        <div class="control-item">
-                            <label>Mode:</label>
+                            <label><i class="fas fa-cog"></i> Mode:</label>
                             <div class="mode-selector">
+                                <label class="mode-option">
+                                    <input type="radio" name="mode" value="manual" id="modeManual" checked onchange="toggleMode()">
+                                    <span>Manual</span>
+                                </label>
                                 <label class="mode-option">
                                     <input type="radio" name="mode" value="auto" id="modeAuto" onchange="toggleMode()">
                                     <span>Auto</span>
                                 </label>
                                 <label class="mode-option">
-                                    <input type="radio" name="mode" value="manual" id="modeManual" checked onchange="toggleMode()">
-                                    <span>Manual</span>
+                                    <input type="radio" name="mode" value="follow" id="modeFollow" onchange="toggleMode()">
+                                    <span>Follow</span>
                                 </label>
                             </div>
                         </div>
 
+                        <!-- Speed Control -->
+                        <div class="control-item">
+                            <label><i class="fas fa-tachometer-alt"></i> Speed:</label>
+                            <input type="range" class="speed-slider" id="speedSlider" min="0" max="255" value="180">
+                            <span class="speed-display" id="speedDisplay">180</span>
+                        </div>
+
+                        <!-- Follow Mode Settings -->
+                        <div class="follow-settings" id="followSettings" style="display: none;">
+                            <!-- Color Selector -->
+                            <div class="control-item">
+                                <label><i class="fas fa-palette"></i> Target Color:</label>
+                                <div class="color-selector">
+                                    <button class="color-btn color-red active" data-color="red" onclick="selectColor('red')"></button>
+                                    <button class="color-btn color-green" data-color="green" onclick="selectColor('green')"></button>
+                                    <button class="color-btn color-blue" data-color="blue" onclick="selectColor('blue')"></button>
+                                    <button class="color-btn color-yellow" data-color="yellow" onclick="selectColor('yellow')"></button>
+                                    <button class="color-btn color-orange" data-color="orange" onclick="selectColor('orange')"></button>
+                                </div>
+                            </div>
+
+                            <!-- Follow Distance -->
+                            <div class="control-item">
+                                <label><i class="fas fa-ruler"></i> Follow Distance:</label>
+                                <input type="range" class="distance-slider" id="followDistanceSlider" min="20" max="100" value="50">
+                                <span class="distance-display" id="followDistanceDisplay">50 cm</span>
+                            </div>
+                        </div>
+
+                        <!-- Emergency Stop -->
                         <button class="emergency-btn" onclick="emergencyStop()">
                             <i class="fas fa-exclamation-triangle"></i>
                             EMERGENCY STOP
@@ -192,26 +250,35 @@
                     </div>
                 </div>
 
-                <!-- Recent Detections -->
+                <!-- Target Info (NEW) -->
                 <div class="panel detection-panel">
                     <div class="panel-header">
-                        <i class="fas fa-eye"></i> RECENT DETECTIONS
+                        <i class="fas fa-crosshairs"></i> TARGET INFO
                     </div>
-                    <div class="panel-body detection-body" id="detectionList">
-                        <div class="detection-item">
-                            <span class="detection-time">14:23</span>
-                            <span class="detection-object">Stop Sign</span>
-                            <span class="detection-confidence">96%</span>
+                    <div class="panel-body target-info-body">
+                        <div class="target-info-item">
+                            <div class="info-label">Target Color:</div>
+                            <div class="info-value" id="targetColorInfo">Red</div>
                         </div>
-                        <div class="detection-item">
-                            <span class="detection-time">14:22</span>
-                            <span class="detection-object">Red Box</span>
-                            <span class="detection-confidence">88%</span>
+                        <div class="target-info-item">
+                            <div class="info-label">Position:</div>
+                            <div class="info-value" id="targetPositionInfo">
+                                <span id="targetX">--</span>, <span id="targetY">--</span>
+                            </div>
                         </div>
-                        <div class="detection-item">
-                            <span class="detection-time">14:21</span>
-                            <span class="detection-object">Green Light</span>
-                            <span class="detection-confidence">--</span>
+                        <div class="target-info-item">
+                            <div class="info-label">Distance:</div>
+                            <div class="info-value" id="targetDistanceInfo">-- cm</div>
+                        </div>
+                        <div class="target-info-item">
+                            <div class="info-label">Confidence:</div>
+                            <div class="info-value" id="targetConfidenceInfo">--</div>
+                        </div>
+                        <div class="target-info-item">
+                            <div class="info-label">Status:</div>
+                            <div class="info-value">
+                                <span class="tracking-badge tracking-lost" id="targetStatusBadge">Lost</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -226,24 +293,9 @@
                 <div class="panel-body log-body">
                     <div class="log-content" id="logContent">
                         <div class="log-entry log-info">
-                            <span class="log-time">14:23:45</span>
+                            <span class="log-time">--:--:--</span>
                             <span class="log-level">INFO</span>
-                            <span class="log-message">Stop sign detected, executing brake</span>
-                        </div>
-                        <div class="log-entry log-info">
-                            <span class="log-time">14:23:48</span>
-                            <span class="log-level">INFO</span>
-                            <span class="log-message">Stopped at position (125, 340)</span>
-                        </div>
-                        <div class="log-entry log-info">
-                            <span class="log-time">14:23:51</span>
-                            <span class="log-level">INFO</span>
-                            <span class="log-message">Resuming motion</span>
-                        </div>
-                        <div class="log-entry log-warning">
-                            <span class="log-time">14:24:10</span>
-                            <span class="log-level">WARNING</span>
-                            <span class="log-message">Battery level at 78%</span>
+                            <span class="log-message">System initialized</span>
                         </div>
                     </div>
                 </div>

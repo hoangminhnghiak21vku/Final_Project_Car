@@ -33,13 +33,27 @@ logger = setup_logger('main', 'data/logs/robot.log')
 # Global variables
 robot_controller = None
 auto_controller = None
+follow_controller = None  # NEW: Follow mode controller
 config = None
 LOG_FILE = 'data/logs/robot.log'
+
+# Follow mode settings
+follow_settings = {
+    'target_color': 'red',
+    'follow_distance': 50,  # cm
+    'tracking': False,
+    'target_x': 0,
+    'target_y': 0,
+    'target_w': 0,
+    'target_h': 0,
+    'confidence': 0,
+    'target_distance': 0
+}
 
 
 def initialize_hardware():
     """Initialize robot hardware"""
-    global robot_controller, auto_controller, config
+    global robot_controller, auto_controller, follow_controller, config
     
     try:
         # Load configuration
@@ -57,6 +71,10 @@ def initialize_hardware():
         # Initialize auto mode controller
         auto_controller = AutoModeController(robot_controller)
         logger.info("Auto Mode Controller initialized")
+        
+        # TODO: Initialize follow controller when ready
+        # follow_controller = FollowModeController(robot_controller)
+        # logger.info("Follow Mode Controller initialized")
         
         return True
         
@@ -88,6 +106,11 @@ def video_feed():
                     break
                 
                 frame = cv2.resize(frame, (320, 240))
+                
+                # TODO: Add object tracking overlay when in follow mode
+                # if robot_controller.current_mode == 'follow' and follow_settings['tracking']:
+                #     frame = draw_target_box(frame, follow_settings)
+                
                 ret, buffer = cv2.imencode('.jpg', frame)
                 frame_bytes = buffer.tobytes()
                 yield (b'--frame\r\n'
@@ -104,24 +127,82 @@ def video_feed():
 
 @app.route('/set_mode')
 def set_mode():
-    """Set control mode (manual/auto)"""
+    """Set control mode (manual/auto/follow)"""
     mode = request.args.get('mode', 'manual')
+    
+    if mode not in ['manual', 'auto', 'follow']:
+        return jsonify({'status': 'error', 'message': 'Invalid mode'}), 400
     
     if robot_controller.set_mode(mode):
         log_message(f"Mode changed to: {mode.upper()}")
         
-        # Start/stop auto controller
+        # Start/stop controllers based on mode
         if mode == 'auto':
             auto_controller.start()
-        else:
-            auto_controller.stop()
+            # Stop follow controller if running
+            # if follow_controller:
+            #     follow_controller.stop()
+        elif mode == 'follow':
+            # Start follow controller
+            # if follow_controller:
+            #     follow_controller.start()
+            # Stop auto controller if running
+            if auto_controller:
+                auto_controller.stop()
+        else:  # manual
+            # Stop both controllers
+            if auto_controller:
+                auto_controller.stop()
+            # if follow_controller:
+            #     follow_controller.stop()
         
         # Emit state update
+        socketio.emit('mode_update', {'mode': mode})
         socketio.emit('sensor_update', get_sensor_data())
         
         return jsonify({'status': 'success', 'mode': mode})
     else:
-        return jsonify({'status': 'error', 'message': 'Invalid mode'}), 400
+        return jsonify({'status': 'error', 'message': 'Failed to set mode'}), 400
+
+
+# ===== FOLLOW MODE SETTINGS (NEW) =====
+
+@app.route('/set_follow_color')
+def set_follow_color():
+    """Set target color for follow mode"""
+    color = request.args.get('color', 'red')
+    
+    valid_colors = ['red', 'green', 'blue', 'yellow', 'orange']
+    if color not in valid_colors:
+        return jsonify({'status': 'error', 'message': 'Invalid color'}), 400
+    
+    follow_settings['target_color'] = color
+    log_message(f"Target color set to: {color.upper()}")
+    
+    # TODO: Update follow controller with new color
+    # if follow_controller:
+    #     follow_controller.set_target_color(color)
+    
+    return jsonify({'status': 'success', 'color': color})
+
+
+@app.route('/set_follow_distance')
+def set_follow_distance():
+    """Set follow distance (safe distance from target)"""
+    try:
+        distance = int(request.args.get('distance', 50))
+        distance = max(20, min(100, distance))  # Clamp between 20-100cm
+        
+        follow_settings['follow_distance'] = distance
+        log_message(f"Follow distance set to: {distance} cm")
+        
+        # TODO: Update follow controller with new distance
+        # if follow_controller:
+        #     follow_controller.set_follow_distance(distance)
+        
+        return jsonify({'status': 'success', 'distance': distance})
+    except ValueError:
+        return jsonify({'status': 'error', 'message': 'Invalid distance value'}), 400
 
 
 # ===== ROBOT CONTROL COMMANDS =====
@@ -261,19 +342,34 @@ def get_sensor_data() -> dict:
     import random
     battery = random.randint(75, 85)
     
-    # Calculate temperature based on motor usage
-    temp = 45 + (abs(state['left_motor_speed']) + abs(state['right_motor_speed'])) / 50
-    
     return {
         'state': state['state'],
         'speed': state['speed'],
         'battery': battery,
-        'temperature': int(temp),
         'left_motor_speed': state['left_motor_speed'],
         'right_motor_speed': state['right_motor_speed'],
         'line_sensors': [False, False, True, True, True, True, False, False],
         'line_position': 0,
         'distance': random.uniform(20, 80)
+    }
+
+
+def get_target_data() -> dict:
+    """Get current target tracking data for follow mode"""
+    # TODO: Get actual data from follow controller
+    # if follow_controller:
+    #     return follow_controller.get_target_data()
+    
+    # Return current follow_settings as placeholder
+    return {
+        'tracking': follow_settings['tracking'],
+        'target_color': follow_settings['target_color'],
+        'target_x': follow_settings['target_x'],
+        'target_y': follow_settings['target_y'],
+        'target_w': follow_settings['target_w'],
+        'target_h': follow_settings['target_h'],
+        'confidence': follow_settings['confidence'],
+        'target_distance': follow_settings['target_distance']
     }
 
 
@@ -288,6 +384,10 @@ def handle_connect():
     # Send current mode and state
     emit('mode_update', {'mode': robot_controller.current_mode})
     emit('sensor_update', get_sensor_data())
+    
+    # Send target data if in follow mode
+    if robot_controller.current_mode == 'follow':
+        emit('target_update', get_target_data())
 
 
 @socketio.on('disconnect')
@@ -307,6 +407,12 @@ def send_sensor_data():
         try:
             sensor_data = get_sensor_data()
             socketio.emit('sensor_update', sensor_data)
+            
+            # Send target data if in follow mode
+            if robot_controller and robot_controller.current_mode == 'follow':
+                target_data = get_target_data()
+                socketio.emit('target_update', target_data)
+                
         except Exception as e:
             logger.error(f"Error sending sensor data: {e}")
 

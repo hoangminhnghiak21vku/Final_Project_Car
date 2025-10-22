@@ -1,11 +1,13 @@
 // ===== SOCKET.IO CONNECTION =====
 const socket = io();
 
-// Biến trạng thái
-let isAutoMode = false;
+// State variables
+let currentMode = 'manual'; // 'manual', 'auto', 'follow'
 let startTime = Date.now();
+let selectedColor = 'red';
+let followDistance = 50;
 
-// Xử lý kết nối Socket.IO
+// Socket event handlers
 socket.on('connect', function() {
     console.log('Connected to server');
     updateConnectionStatus(true);
@@ -16,31 +18,29 @@ socket.on('disconnect', function() {
     updateConnectionStatus(false);
 });
 
-// Nhận dữ liệu sensor từ server
+// Receive sensor data from server
 socket.on('sensor_update', function(data) {
     console.log('Sensor data received:', data);
     updateSensorData(data);
 });
 
-// Nhận cập nhật mode từ server
+// Receive mode update from server
 socket.on('mode_update', function(data) {
     console.log('Mode update received:', data);
     if (data.mode) {
-        isAutoMode = (data.mode === 'auto');
-        const modeAuto = document.getElementById('modeAuto');
-        const modeManual = document.getElementById('modeManual');
-        
-        if (isAutoMode) {
-            modeAuto.checked = true;
-        } else {
-            modeManual.checked = true;
-        }
-        
+        currentMode = data.mode;
+        updateModeRadioButtons();
         updateControlsState();
     }
 });
 
-// Nhận log entries từ server
+// Receive target tracking data
+socket.on('target_update', function(data) {
+    console.log('Target data received:', data);
+    updateTargetData(data);
+});
+
+// Receive log entries from server
 socket.on('log_entry', function(data) {
     addLogEntry(data.time, data.level, data.message);
 });
@@ -61,7 +61,7 @@ function updateConnectionStatus(isConnected) {
 
 // ===== SENSOR DATA UPDATE =====
 function updateSensorData(data) {
-    // Cập nhật Battery
+    // Update Battery
     if (data.battery !== undefined) {
         const batteryBar = document.getElementById('batteryBar');
         const batteryValue = document.getElementById('batteryValue');
@@ -69,7 +69,7 @@ function updateSensorData(data) {
         batteryValue.textContent = data.battery + '%';
     }
     
-    // Cập nhật Speed
+    // Update Speed
     if (data.speed !== undefined) {
         const speedBar = document.getElementById('speedBar');
         const speedValue = document.getElementById('speedValue');
@@ -78,57 +78,141 @@ function updateSensorData(data) {
         speedValue.textContent = data.speed + '/255';
     }
     
-    // Cập nhật Temperature
-    if (data.temperature !== undefined) {
-        document.getElementById('tempValue').textContent = data.temperature + '°C';
-    }
-    
-    // Cập nhật State
+    // Update State
     if (data.state !== undefined) {
         const stateValue = document.getElementById('stateValue');
         const stateDot = document.getElementById('stateDot');
         stateValue.textContent = data.state;
-        
-        // Màu state dot theo trạng thái
         stateDot.style.background = getStateColor(data.state);
     }
     
-    // Cập nhật Line Sensors
+    // Update Line Sensors
     if (data.line_sensors !== undefined) {
         updateLineSensors(data.line_sensors);
     }
     
-    // Cập nhật Line Position
+    // Update Line Position
     if (data.line_position !== undefined) {
         document.getElementById('linePosition').textContent = 
             (data.line_position > 0 ? '+' : '') + data.line_position;
     }
     
-    // Cập nhật Ultrasonic Distance
+    // Update Ultrasonic Distance
     if (data.distance !== undefined) {
         const distValue = document.getElementById('ultrasonicValue');
         const distBar = document.getElementById('distanceBar');
         distValue.textContent = data.distance.toFixed(1);
         
-        // Distance bar: 0-100cm range
         const percentage = Math.min(100, data.distance);
         distBar.style.width = percentage + '%';
     }
+}
+
+// ===== TARGET DATA UPDATE (NEW) =====
+function updateTargetData(data) {
+    // Show/hide target-related UI elements
+    const targetDistanceItem = document.getElementById('targetDistanceItem');
+    const trackingStatusItem = document.getElementById('trackingStatusItem');
+    const confidenceItem = document.getElementById('confidenceItem');
     
-    // Cập nhật Detections
-    if (data.detection !== undefined) {
-        addDetection(data.detection);
+    if (currentMode === 'follow') {
+        targetDistanceItem.style.display = 'flex';
+        trackingStatusItem.style.display = 'flex';
+        confidenceItem.style.display = 'flex';
+    } else {
+        targetDistanceItem.style.display = 'none';
+        trackingStatusItem.style.display = 'none';
+        confidenceItem.style.display = 'none';
+        return;
+    }
+    
+    // Update tracking status
+    const trackingStatusValue = document.getElementById('trackingStatusValue');
+    const trackingBadge = trackingStatusValue.querySelector('.tracking-badge');
+    const targetStatusBadge = document.getElementById('targetStatusBadge');
+    
+    if (data.tracking) {
+        trackingBadge.textContent = 'Tracking';
+        trackingBadge.className = 'tracking-badge tracking-active';
+        targetStatusBadge.textContent = 'Tracking';
+        targetStatusBadge.className = 'tracking-badge tracking-active';
+    } else {
+        trackingBadge.textContent = 'Lost Target';
+        trackingBadge.className = 'tracking-badge tracking-lost';
+        targetStatusBadge.textContent = 'Lost';
+        targetStatusBadge.className = 'tracking-badge tracking-lost';
+    }
+    
+    // Update target distance
+    if (data.target_distance !== undefined) {
+        const targetDistanceValue = document.getElementById('targetDistanceValue');
+        const targetDistanceInfo = document.getElementById('targetDistanceInfo');
+        targetDistanceValue.textContent = data.target_distance.toFixed(1) + ' cm';
+        targetDistanceInfo.textContent = data.target_distance.toFixed(1) + ' cm';
+    }
+    
+    // Update confidence
+    if (data.confidence !== undefined) {
+        const confidenceBar = document.getElementById('confidenceBar');
+        const confidenceValue = document.getElementById('confidenceValue');
+        const targetConfidenceInfo = document.getElementById('targetConfidenceInfo');
+        
+        confidenceBar.style.width = data.confidence + '%';
+        confidenceValue.textContent = data.confidence + '%';
+        targetConfidenceInfo.textContent = data.confidence + '%';
+    }
+    
+    // Update target position
+    if (data.target_x !== undefined && data.target_y !== undefined) {
+        document.getElementById('targetX').textContent = data.target_x;
+        document.getElementById('targetY').textContent = data.target_y;
+        
+        // Update target box overlay
+        updateTargetOverlay(data.target_x, data.target_y, data.target_w, data.target_h, data.tracking);
+    }
+    
+    // Update target color info
+    document.getElementById('targetColorInfo').textContent = 
+        selectedColor.charAt(0).toUpperCase() + selectedColor.slice(1);
+}
+
+// ===== UPDATE TARGET OVERLAY (NEW) =====
+function updateTargetOverlay(x, y, w, h, tracking) {
+    const overlay = document.getElementById('targetOverlay');
+    const targetBox = document.getElementById('targetBox');
+    
+    if (tracking && x !== undefined && y !== undefined) {
+        overlay.style.display = 'block';
+        
+        // Convert normalized coordinates to pixels (assuming video frame size)
+        // Adjust these values based on your actual video dimensions
+        const videoWidth = 320;
+        const videoHeight = 240;
+        
+        targetBox.style.left = (x * videoWidth) + 'px';
+        targetBox.style.top = (y * videoHeight) + 'px';
+        targetBox.style.width = (w * videoWidth) + 'px';
+        targetBox.style.height = (h * videoHeight) + 'px';
+    } else {
+        overlay.style.display = 'none';
     }
 }
 
 // ===== STATE COLOR =====
 function getStateColor(state) {
     const colors = {
-        'IDLE': '#gray',
+        'IDLE': '#9e9e9e',
         'FOLLOWING LINE': '#4caf50',
+        'FOLLOWING TARGET': '#2196f3',
         'OBSTACLE DETECTED': '#ff9800',
         'STOPPED': '#f44336',
-        'TURNING': '#2196f3'
+        'TURNING': '#2196f3',
+        'MOVING FORWARD': '#4caf50',
+        'MOVING BACKWARD': '#ff9800',
+        'TURNING LEFT': '#2196f3',
+        'TURNING RIGHT': '#2196f3',
+        'AUTO MODE': '#9c27b0',
+        'EMERGENCY STOP': '#f44336'
     };
     return colors[state] || '#4caf50';
 }
@@ -147,39 +231,13 @@ function updateLineSensors(sensors) {
     });
 }
 
-// ===== ADD DETECTION =====
-function addDetection(detection) {
-    const detectionList = document.getElementById('detectionList');
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString('vi-VN', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
-    });
-    
-    const item = document.createElement('div');
-    item.className = 'detection-item';
-    item.innerHTML = `
-        <span class="detection-time">${timeStr}</span>
-        <span class="detection-object">${detection.object}</span>
-        <span class="detection-confidence">${detection.confidence ? detection.confidence + '%' : '--'}</span>
-    `;
-    
-    // Thêm vào đầu danh sách
-    detectionList.insertBefore(item, detectionList.firstChild);
-    
-    // Giữ tối đa 5 items
-    while (detectionList.children.length > 5) {
-        detectionList.removeChild(detectionList.lastChild);
-    }
-}
-
 // ===== ROBOT CONTROL COMMANDS =====
 function sendCommand(command) {
-    // Kiểm tra mode trước khi gửi lệnh
-    if (isAutoMode) {
-        console.log('Cannot send command in Auto mode');
+    // Check mode before sending command
+    if (currentMode !== 'manual') {
+        console.log('Cannot send command in ' + currentMode + ' mode');
         addLogEntry(new Date().toLocaleTimeString(), 'WARNING', 
-            'Manual control disabled in Auto mode');
+            'Manual control disabled in ' + currentMode.toUpperCase() + ' mode');
         return;
     }
     
@@ -221,39 +279,103 @@ function emergencyStop() {
 
 // ===== MODE TOGGLE =====
 function toggleMode() {
+    const modeManual = document.getElementById('modeManual');
     const modeAuto = document.getElementById('modeAuto');
-    isAutoMode = modeAuto.checked;
+    const modeFollow = document.getElementById('modeFollow');
     
-    const mode = isAutoMode ? 'auto' : 'manual';
+    if (modeManual.checked) {
+        currentMode = 'manual';
+    } else if (modeAuto.checked) {
+        currentMode = 'auto';
+    } else if (modeFollow.checked) {
+        currentMode = 'follow';
+    }
     
-    // Gửi request đến server
-    fetch('/set_mode?mode=' + mode)
+    // Send request to server
+    fetch('/set_mode?mode=' + currentMode)
         .then(response => response.json())
         .then(data => {
-            console.log('Mode changed to:', mode, data);
+            console.log('Mode changed to:', currentMode, data);
             addLogEntry(new Date().toLocaleTimeString(), 'INFO', 
-                'Mode changed to: ' + mode.toUpperCase());
+                'Mode changed to: ' + currentMode.toUpperCase());
             updateControlsState();
         })
         .catch(error => {
             console.error('Error changing mode:', error);
+            addLogEntry(new Date().toLocaleTimeString(), 'ERROR', 
+                'Failed to change mode');
         });
+}
+
+// ===== UPDATE MODE RADIO BUTTONS =====
+function updateModeRadioButtons() {
+    const modeManual = document.getElementById('modeManual');
+    const modeAuto = document.getElementById('modeAuto');
+    const modeFollow = document.getElementById('modeFollow');
+    
+    modeManual.checked = (currentMode === 'manual');
+    modeAuto.checked = (currentMode === 'auto');
+    modeFollow.checked = (currentMode === 'follow');
 }
 
 // ===== UPDATE CONTROLS STATE =====
 function updateControlsState() {
     const controlPad = document.getElementById('controlPad');
     const buttons = controlPad.querySelectorAll('.ctrl-btn');
+    const followSettings = document.getElementById('followSettings');
     
+    // Disable manual control buttons if not in manual mode
     buttons.forEach(btn => {
-        btn.disabled = isAutoMode;
+        btn.disabled = (currentMode !== 'manual');
     });
     
-    if (isAutoMode) {
+    if (currentMode !== 'manual') {
         controlPad.style.opacity = '0.4';
     } else {
         controlPad.style.opacity = '1';
     }
+    
+    // Show/hide follow settings
+    if (currentMode === 'follow') {
+        followSettings.style.display = 'flex';
+    } else {
+        followSettings.style.display = 'none';
+    }
+}
+
+// ===== COLOR SELECTION (NEW) =====
+function selectColor(color) {
+    selectedColor = color;
+    
+    // Update UI
+    const colorButtons = document.querySelectorAll('.color-btn');
+    colorButtons.forEach(btn => {
+        if (btn.dataset.color === color) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+    
+    // Send to server
+    fetch('/set_follow_color?color=' + color)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Target color set to:', color, data);
+            addLogEntry(new Date().toLocaleTimeString(), 'INFO', 
+                'Target color changed to: ' + color.toUpperCase());
+            
+            // Update target color info
+            document.getElementById('targetColorInfo').textContent = 
+                color.charAt(0).toUpperCase() + color.slice(1);
+            
+            // Update target label
+            document.getElementById('targetLabel').textContent = 
+                'Target: ' + color.charAt(0).toUpperCase() + color.slice(1);
+        })
+        .catch(error => {
+            console.error('Error setting color:', error);
+        });
 }
 
 // ===== SPEED SLIDER =====
@@ -278,10 +400,32 @@ speedSlider.addEventListener('change', function() {
         });
 });
 
+// ===== FOLLOW DISTANCE SLIDER (NEW) =====
+const followDistanceSlider = document.getElementById('followDistanceSlider');
+const followDistanceDisplay = document.getElementById('followDistanceDisplay');
+
+followDistanceSlider.addEventListener('input', function() {
+    followDistanceDisplay.textContent = this.value + ' cm';
+});
+
+followDistanceSlider.addEventListener('change', function() {
+    followDistance = parseInt(this.value);
+    fetch('/set_follow_distance?distance=' + followDistance)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Follow distance set to:', followDistance, data);
+            addLogEntry(new Date().toLocaleTimeString(), 'INFO', 
+                'Follow distance set to: ' + followDistance + ' cm');
+        })
+        .catch(error => {
+            console.error('Error setting follow distance:', error);
+        });
+});
+
 // ===== KEYBOARD CONTROL =====
 document.addEventListener('keydown', function(event) {
-    // Không cho phép điều khiển bằng phím khi ở auto mode
-    if (isAutoMode) {
+    // Only allow keyboard control in manual mode
+    if (currentMode !== 'manual') {
         return;
     }
     
@@ -329,10 +473,10 @@ function addLogEntry(time, level, message) {
         <span class="log-message">${message}</span>
     `;
     
-    // Thêm vào đầu log
+    // Add to top of log
     logContent.insertBefore(entry, logContent.firstChild);
     
-    // Giữ tối đa 50 entries
+    // Keep max 50 entries
     while (logContent.children.length > 50) {
         logContent.removeChild(logContent.lastChild);
     }
