@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogisticsBot Control Panel</title>
+    
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+    <div class="main-container">
+        <!-- Top Navigation Bar -->
+        <nav class="top-navbar">
+            <div class="navbar-left">
+                <i class="fas fa-robot"></i>
+                <h1>LogisticsBot Control Panel</h1>
+            </div>
+            <div class="navbar-right">
+                <button class="nav-btn" title="User Profile">
+                    <i class="fas fa-user"></i>
+                </button>
+                <button class="nav-btn" title="Settings">
+                    <i class="fas fa-cog"></i>
+                </button>
+                <div class="connection-badge" id="connectionBadge">
+                    <i class="fas fa-bolt"></i>
+                    <span id="connectionText">Connecting...</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Grid -->
+        <div class="content-grid">
+            <!-- Row 1: Video + Status -->
+            <div class="grid-row-1">
+                <!-- Video Stream Card -->
+                <div class="panel video-panel">
+                    <div class="panel-header">
+                        <i class="fas fa-video"></i> VIDEO STREAM
+                        <span class="stream-info">320x240 @ 20fps</span>
+                    </div>
+                    <div class="panel-body video-body">
+                        <div class="video-frame">
+                            <img src="/video_feed" alt="Camera Feed" id="videoStream">
+                            <div class="ai-overlay" id="aiOverlay">
+                                <span class="overlay-tag">AI Detection Active</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Status Card -->
+                <div class="panel status-panel">
+                    <div class="panel-header">
+                        <i class="fas fa-chart-bar"></i> SYSTEM STATUS
+                    </div>
+                    <div class="panel-body status-body">
+                        <div class="status-item">
+                            <div class="status-label">
+                                <span class="status-dot" id="stateDot"></span>
+                                State
+                            </div>
+                            <div class="status-value" id="stateValue">IDLE</div>
+                        </div>
+
+                        <div class="status-item">
+                            <div class="status-label">Speed</div>
+                            <div class="progress-container">
+                                <div class="progress-bar" id="speedBar" style="width: 70%"></div>
+                                <span class="progress-text" id="speedValue">180/255</span>
+                            </div>
+                        </div>
+
+                        <div class="status-item">
+                            <div class="status-label">Battery</div>
+                            <div class="progress-container battery">
+                                <div class="progress-bar" id="batteryBar" style="width: 78%"></div>
+                                <span class="progress-text" id="batteryValue">78%</span>
+                            </div>
+                        </div>
+
+                        <div class="status-item">
+                            <div class="status-label">Temperature</div>
+                            <div class="status-value" id="tempValue">52°C</div>
+                        </div>
+
+                        <div class="status-item">
+                            <div class="status-label">Uptime</div>
+                            <div class="status-value" id="uptimeValue">1h 23m</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2: Manual Control -->
+            <div class="panel control-panel">
+                <div class="panel-header">
+                    <i class="fas fa-gamepad"></i> MANUAL CONTROL
+                </div>
+                <div class="panel-body control-body">
+                    <div class="control-left">
+                        <div class="control-pad" id="controlPad">
+                            <button class="ctrl-btn btn-up" onclick="sendCommand('forward')">
+                                <i class="fas fa-chevron-up"></i>
+                            </button>
+                            <button class="ctrl-btn btn-left" onclick="sendCommand('left')">
+                                <i class="fas fa-chevron-left"></i>
+                            </button>
+                            <button class="ctrl-btn btn-center" onclick="sendCommand('stop')">
+                                <i class="fas fa-circle"></i>
+                            </button>
+                            <button class="ctrl-btn btn-right" onclick="sendCommand('right')">
+                                <i class="fas fa-chevron-right"></i>
+                            </button>
+                            <button class="ctrl-btn btn-down" onclick="sendCommand('backward')">
+                                <i class="fas fa-chevron-down"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="control-right">
+                        <div class="control-item">
+                            <label>Speed:</label>
+                            <input type="range" class="speed-slider" id="speedSlider" min="0" max="255" value="180">
+                            <span id="speedDisplay">180</span>
+                        </div>
+
+                        <div class="control-item">
+                            <label>Mode:</label>
+                            <div class="mode-selector">
+                                <label class="mode-option">
+                                    <input type="radio" name="mode" value="auto" id="modeAuto" onchange="toggleMode()">
+                                    <span>Auto</span>
+                                </label>
+                                <label class="mode-option">
+                                    <input type="radio" name="mode" value="manual" id="modeManual" checked onchange="toggleMode()">
+                                    <span>Manual</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <button class="emergency-btn" onclick="emergencyStop()">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            EMERGENCY STOP
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 3: Sensors -->
+            <div class="grid-row-3">
+                <!-- Line Sensors -->
+                <div class="panel sensor-panel">
+                    <div class="panel-header">
+                        <i class="fas fa-road"></i> LINE SENSORS
+                    </div>
+                    <div class="panel-body sensor-body">
+                        <div class="line-sensor-display" id="lineSensors">
+                            <span class="sensor-bar"></span>
+                            <span class="sensor-bar"></span>
+                            <span class="sensor-bar active"></span>
+                            <span class="sensor-bar active"></span>
+                            <span class="sensor-bar active"></span>
+                            <span class="sensor-bar active"></span>
+                            <span class="sensor-bar"></span>
+                            <span class="sensor-bar"></span>
+                        </div>
+                        <div class="sensor-info">
+                            Position: <strong id="linePosition">+2</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ultrasonic Sensor -->
+                <div class="panel sensor-panel">
+                    <div class="panel-header">
+                        <i class="fas fa-radar"></i> ULTRASONIC
+                    </div>
+                    <div class="panel-body sensor-body">
+                        <div class="distance-display">
+                            <div class="distance-value" id="ultrasonicValue">45.2</div>
+                            <div class="distance-unit">cm</div>
+                        </div>
+                        <div class="distance-indicator">
+                            <div class="distance-bar" id="distanceBar" style="width: 45%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Detections -->
+                <div class="panel detection-panel">
+                    <div class="panel-header">
+                        <i class="fas fa-eye"></i> RECENT DETECTIONS
+                    </div>
+                    <div class="panel-body detection-body" id="detectionList">
+                        <div class="detection-item">
+                            <span class="detection-time">14:23</span>
+                            <span class="detection-object">Stop Sign</span>
+                            <span class="detection-confidence">96%</span>
+                        </div>
+                        <div class="detection-item">
+                            <span class="detection-time">14:22</span>
+                            <span class="detection-object">Red Box</span>
+                            <span class="detection-confidence">88%</span>
+                        </div>
+                        <div class="detection-item">
+                            <span class="detection-time">14:21</span>
+                            <span class="detection-object">Green Light</span>
+                            <span class="detection-confidence">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 4: Activity Log -->
+            <div class="panel log-panel">
+                <div class="panel-header">
+                    <i class="fas fa-list"></i> ACTIVITY LOG
+                    <button class="header-btn" onclick="clearLog()">Clear</button>
+                </div>
+                <div class="panel-body log-body">
+                    <div class="log-content" id="logContent">
+                        <div class="log-entry log-info">
+                            <span class="log-time">14:23:45</span>
+                            <span class="log-level">INFO</span>
+                            <span class="log-message">Stop sign detected, executing brake</span>
+                        </div>
+                        <div class="log-entry log-info">
+                            <span class="log-time">14:23:48</span>
+                            <span class="log-level">INFO</span>
+                            <span class="log-message">Stopped at position (125, 340)</span>
+                        </div>
+                        <div class="log-entry log-info">
+                            <span class="log-time">14:23:51</span>
+                            <span class="log-level">INFO</span>
+                            <span class="log-message">Resuming motion</span>
+                        </div>
+                        <div class="log-entry log-warning">
+                            <span class="log-time">14:24:10</span>
+                            <span class="log-level">WARNING</span>
+                            <span class="log-message">Battery level at 78%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <!-- Socket.IO Client -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+    <!-- Custom JS -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# Core dependencies
+Flask==3.0.0
+Flask-SocketIO==5.3.6
+python-socketio==5.10.0
+
+# GPIO for Raspberry Pi 5 (thay thế RPi.GPIO)
+gpiozero==2.0.1
+
+# Optional: pigpio for hardware PWM (better performance)
+# Install manually if needed: pip install pigpio
+# pigpio==1.78
+
+# Computer Vision (optional)
+opencv-python==4.9.0.80
+
+# Configuration
+PyYAML==6.0.1
+
+# Utilities
+numpy==1.26.3
+
+# Optional: Web server for production
+# gunicorn==21.2.0
+# eventlet==0.33.3

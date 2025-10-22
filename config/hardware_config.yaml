@@ -1,0 +1,57 @@
+# Hardware Configuration for Raspberry Pi 5 + L298N
+# Robot: 2 rear motors + 1 front universal wheel
+
+# Motor Driver L298N Configuration
+motor_driver:
+  type: "L298N"
+  
+  # Left Motor (Motor A)
+  left_motor:
+    enable_pin: 18      # ENA - PWM pin for speed control
+    input1_pin: 23      # IN1 - Direction control
+    input2_pin: 24      # IN2 - Direction control
+    max_speed: 255
+    min_speed: 0
+    reverse: false      # Set true if motor direction is reversed
+  
+  # Right Motor (Motor B)
+  right_motor:
+    enable_pin: 13      # ENB - PWM pin for speed control
+    input1_pin: 27      # IN3 - Direction control
+    input2_pin: 22      # IN4 - Direction control
+    max_speed: 255
+    min_speed: 0
+    reverse: false      # Set true if motor direction is reversed
+
+# PWM Configuration
+pwm:
+  frequency: 1000       # PWM frequency in Hz (1kHz recommended)
+
+# Robot Physical Parameters
+robot:
+  wheel_diameter: 0.065    # meters (65mm)
+  wheel_base: 0.15         # meters (150mm - distance between left and right wheels)
+  max_speed: 0.5           # m/s
+  max_angular_speed: 1.0   # rad/s
+
+# Safety Limits
+safety:
+  emergency_stop_distance: 0.2  # meters
+  max_acceleration: 2.0         # m/s²
+  timeout: 5.0                  # seconds - motor auto-stop if no command received
+
+# Sensor Configuration (for future expansion)
+sensors:
+  ultrasonic:
+    trigger_pin: 17
+    echo_pin: 4
+    max_distance: 4.0   # meters
+  
+  line_sensors:
+    enabled: false
+    pins: [5, 6, 7, 8, 9, 10, 11, 12]  # 8 sensors array
+  
+  k210_vision:
+    enabled: false
+    uart_port: "/dev/ttyAMA0"
+    baudrate: 115200
