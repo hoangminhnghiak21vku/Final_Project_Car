@@ -1,11 +1,12 @@
 /*
- * Arduino Uno Firmware - LogisticsBot Controller
+ * Arduino Uno Firmware - LogisticsBot Controller (Camera Only)
  * 
  * Handles:
  * - L298N Motor Control (PWM + Direction)
- * - 5x IR Line Sensors (Fallback mode when camera fails)
- * - HC-SR04 Ultrasonic Sensor
+ * - HC-SR04 Ultrasonic Sensor (Obstacle Detection)
  * - UART Communication with Raspberry Pi
+ * 
+ * NO IR LINE SENSORS - Camera does all lane detection
  * 
  * Communication: JSON protocol over Serial (115200 baud)
  */
@@ -24,32 +25,17 @@
 #define IN4 5   // Right Motor Direction 2
 
 // ===== SENSOR PIN DEFINITIONS =====
-// HC-SR04 Ultrasonic Sensor
+// HC-SR04 Ultrasonic Sensor (Obstacle Detection Only)
 #define ULTRASONIC_TRIG  12
 #define ULTRASONIC_ECHO  11
-
-// IR Line Sensors (5 sensors) - UPDATED
-#define LINE_SENSOR_1   A0  // Far Left
-#define LINE_SENSOR_2   A1  // Left
-#define LINE_SENSOR_3   A2  // Center
-#define LINE_SENSOR_4   A3  // Right
-#define LINE_SENSOR_5   A4  // Far Right
-
-// IR Sensor threshold (adjustable)
-#define IR_THRESHOLD 512  // ADC value 0-1023 (black > threshold > white)
 
 // ===== GLOBAL VARIABLES =====
 int leftSpeed = 0;
 int rightSpeed = 0;
-bool lineSensors[5] = {0};  // Changed from 8 to 5
-int linePosition = 0;
 float distance = 0.0;
 
-// Sensor mode
-bool irSensorEnabled = false;  // Default: disabled (camera primary)
-
 unsigned long lastSensorRead = 0;
-unsigned long sensorReadInterval = 50; // Read sensors every 50ms
+unsigned long sensorReadInterval = 100; // Read sensors every 100ms (slower, only ultrasonic)
 
 // ===== SETUP =====
 void setup() {
@@ -70,18 +56,11 @@ void setup() {
   pinMode(ULTRASONIC_TRIG, OUTPUT);
   pinMode(ULTRASONIC_ECHO, INPUT);
   
-  // Line sensor pins (5 sensors only)
-  pinMode(LINE_SENSOR_1, INPUT);
-  pinMode(LINE_SENSOR_2, INPUT);
-  pinMode(LINE_SENSOR_3, INPUT);
-  pinMode(LINE_SENSOR_4, INPUT);
-  pinMode(LINE_SENSOR_5, INPUT);
-  
   // Stop motors on startup
   stopMotors();
   
   // Send ready signal
-  Serial.println("{\"status\":\"ready\",\"device\":\"arduino_uno\",\"ir_sensors\":5}");
+  Serial.println("{\"status\":\"ready\",\"device\":\"arduino_uno\",\"mode\":\"camera_only\"}");
 }
 
 // ===== MAIN LOOP =====
@@ -129,16 +108,6 @@ void processCommand() {
   else if (strcmp(cmd, "SET_SPEED") == 0) {
     int speed = doc["value"] | 0;
     sendAck("SET_SPEED");
-  }
-  else if (strcmp(cmd, "ENABLE_IR") == 0) {
-    // Enable IR sensors (fallback mode)
-    irSensorEnabled = true;
-    sendAck("IR_ENABLED");
-  }
-  else if (strcmp(cmd, "DISABLE_IR") == 0) {
-    // Disable IR sensors (camera mode)
-    irSensorEnabled = false;
-    sendAck("IR_DISABLED");
   }
   else if (strcmp(cmd, "GET_SENSORS") == 0) {
     sendSensorData();
@@ -214,35 +183,7 @@ void stopMotors() {
 
 // ===== SENSOR READING =====
 void readSensors() {
-  // Read line sensors (5 sensors only)
-  // Only read if IR sensors are enabled
-  if (irSensorEnabled) {
-    lineSensors[0] = (analogRead(LINE_SENSOR_1) > IR_THRESHOLD) ? 1 : 0;
-    lineSensors[1] = (analogRead(LINE_SENSOR_2) > IR_THRESHOLD) ? 1 : 0;
-    lineSensors[2] = (analogRead(LINE_SENSOR_3) > IR_THRESHOLD) ? 1 : 0;
-    lineSensors[3] = (analogRead(LINE_SENSOR_4) > IR_THRESHOLD) ? 1 : 0;
-    lineSensors[4] = (analogRead(LINE_SENSOR_5) > IR_THRESHOLD) ? 1 : 0;
-    
-    // Calculate line position (-2 to +2)
-    // Weights: -2, -1, 0, 1, 2
-    int sum = 0;
-    int count = 0;
-    for (int i = 0; i < 5; i++) {
-      if (lineSensors[i]) {
-        sum += (i - 2);  // Position: -2, -1, 0, 1, 2
-        count++;
-      }
-    }
-    linePosition = (count > 0) ? sum : 0;
-  } else {
-    // IR sensors disabled, set all to 0
-    for (int i = 0; i < 5; i++) {
-      lineSensors[i] = 0;
-    }
-    linePosition = 0;
-  }
-  
-  // Read ultrasonic distance (always enabled)
+  // Only read ultrasonic distance (obstacle detection)
   distance = readUltrasonic();
 }
 
@@ -264,20 +205,14 @@ float readUltrasonic() {
 
 // ===== COMMUNICATION =====
 void sendSensorData() {
-  StaticJsonDocument<300> doc;
+  StaticJsonDocument<200> doc;
   
-  // Line sensors array (5 sensors)
-  JsonArray lineArray = doc.createNestedArray("line");
-  for (int i = 0; i < 5; i++) {
-    lineArray.add(lineSensors[i]);
-  }
-  
-  doc["line_pos"] = linePosition;
+  // Only distance sensor (no line sensors)
   doc["distance"] = round(distance * 10) / 10.0; // Round to 1 decimal
   doc["left_speed"] = leftSpeed;
   doc["right_speed"] = rightSpeed;
   doc["uptime"] = millis();
-  doc["ir_enabled"] = irSensorEnabled;  // NEW: Report IR sensor status
+  doc["mode"] = "camera_only";
   
   serializeJson(doc, Serial);
   Serial.println();

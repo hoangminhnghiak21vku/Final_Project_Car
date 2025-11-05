@@ -1,19 +1,18 @@
 # Hardware Configuration for Raspberry Pi 5 + Arduino Uno
 # Robot: 2 rear motors + 1 front universal wheel
+# Lane Detection: Camera ONLY (No IR sensors)
 
 # Control Mode: 'arduino' or 'direct'
-# - 'arduino': Use Arduino Uno for motor/sensor control (Recommended)
-# - 'direct': Use Raspberry Pi GPIO directly with L298N (Legacy)
 control_mode: 'arduino'
 
-# Arduino Configuration (when control_mode = 'arduino')
+# Arduino Configuration
 arduino:
-  port: '/dev/ttyACM0'  # Arduino Uno usually appears as ttyACM0 (or ttyUSB0)
+  port: '/dev/ttyACM0'  # Arduino Uno port
   baudrate: 115200
   timeout: 1.0
-  reconnect_interval: 5.0  # Try reconnect every 5 seconds if disconnected
+  reconnect_interval: 5.0
   
-  # Arduino Uno pin mapping (for reference)
+  # Arduino Uno pin mapping
   pins:
     # Motor pins
     left_motor_pwm: 9      # ENA - PWM
@@ -26,39 +25,34 @@ arduino:
     # Sensor pins
     ultrasonic_trig: 12
     ultrasonic_echo: 11
-    line_sensors: [A0, A1, A2, A3, A4, A5, 6, 7]  # 8 sensors
+    # NO LINE SENSORS - Camera only
 
-# Motor Driver Configuration (when control_mode = 'direct')
-# Note: Not used when Arduino is controlling motors
+# Motor Driver Configuration (backup - not used when Arduino controls)
 motor_driver:
   type: "L298N"
-  
-  # Left Motor (Motor A)
   left_motor:
-    enable_pin: 18      # ENA - PWM pin for speed control
-    input1_pin: 23      # IN1 - Direction control
-    input2_pin: 24      # IN2 - Direction control
+    enable_pin: 18
+    input1_pin: 23
+    input2_pin: 24
     max_speed: 255
     min_speed: 0
-    reverse: false      # Set true if motor direction is reversed
-  
-  # Right Motor (Motor B)
+    reverse: false
   right_motor:
-    enable_pin: 13      # ENB - PWM pin for speed control
-    input1_pin: 27      # IN3 - Direction control
-    input2_pin: 22      # IN4 - Direction control
+    enable_pin: 13
+    input1_pin: 27
+    input2_pin: 22
     max_speed: 255
     min_speed: 0
-    reverse: false      # Set true if motor direction is reversed
+    reverse: false
 
 # PWM Configuration
 pwm:
-  frequency: 1000       # PWM frequency in Hz (1kHz recommended)
+  frequency: 1000  # Hz
 
 # Robot Physical Parameters
 robot:
   wheel_diameter: 0.065    # meters (65mm)
-  wheel_base: 0.15         # meters (150mm - distance between left and right wheels)
+  wheel_base: 0.15         # meters (150mm)
   max_speed: 0.5           # m/s
   max_angular_speed: 1.0   # rad/s
 
@@ -66,36 +60,62 @@ robot:
 safety:
   emergency_stop_distance: 0.2  # meters (20cm)
   max_acceleration: 2.0         # m/s²
-  timeout: 5.0                  # seconds - motor auto-stop if no command received
-  min_safe_distance: 15.0       # cm - minimum distance before obstacle avoidance
+  timeout: 5.0                  # seconds
+  min_safe_distance: 15.0       # cm
 
 # Sensor Configuration
 sensors:
-  # HC-SR04 Ultrasonic (controlled by Arduino)
+  # HC-SR04 Ultrasonic (Obstacle Detection)
   ultrasonic:
     enabled: true
     max_distance: 400.0   # cm
     min_distance: 2.0     # cm
+    update_rate: 10       # Hz
   
-  # IR Line Sensors (8 sensors, controlled by Arduino)
+  # NO IR LINE SENSORS
+  # Line detection is done by camera only
   line_sensors:
-    enabled: true
-    count: 8
-    threshold: 512        # ADC threshold (0-1023) for black/white detection
+    enabled: false        # Disabled - camera only
+    count: 0
+    pins: []
   
-  # Raspberry Pi Camera V2
+  # Raspberry Pi Camera V2 (PRIMARY - Lane Detection)
   camera:
     enabled: true
-    resolution: [320, 240]
-    framerate: 20
-    device: 0  # /dev/video0
+    resolution: [640, 480]  # Higher resolution for better lane detection
+    framerate: 30           # Higher FPS for smoother detection
+    device: 0               # /dev/video0
+    
+    # Camera settings for lane detection
+    auto_exposure: true
+    brightness: 50
+    contrast: 50
+    saturation: 50
 
 # AI/Computer Vision Settings
 ai:
-  # Object Detection
+  # Lane Detection (Camera-based)
+  lane_detection:
+    enabled: true
+    method: 'opencv'        # 'opencv', 'cnn', or 'hybrid'
+    
+    # OpenCV lane detection settings
+    roi_top: 0.5            # Region of interest (top 50% of frame)
+    roi_bottom: 1.0
+    canny_low: 50
+    canny_high: 150
+    hough_threshold: 50
+    min_line_length: 50
+    max_line_gap: 150
+    
+    # Lane tracking
+    smoothing_factor: 0.8   # Smooth lane transitions
+    confidence_threshold: 0.7
+  
+  # Object Detection (for Follow mode)
   object_detection:
-    enabled: false
-    model: 'yolov5s'  # or 'mobilenet_ssd', 'efficientdet'
+    enabled: false          # Enable when needed
+    model: 'yolov5s'
     confidence_threshold: 0.5
   
   # Color Tracking (for Follow mode)
@@ -117,17 +137,41 @@ ai:
       orange:
         lower_hsv: [10, 100, 100]
         upper_hsv: [20, 255, 255]
+
+# Lane Following Settings (Camera-based)
+lane_following:
+  enabled: true
   
-  # Line Detection
-  line_detection:
-    enabled: true
-    use_camera: false  # Use camera instead of IR sensors
-    threshold: 128
+  # PID Controller parameters
+  pid:
+    kp: 1.0              # Proportional gain
+    ki: 0.0              # Integral gain
+    kd: 0.1              # Derivative gain
+    
+    # PID limits
+    max_output: 255
+    min_output: -255
+  
+  # Speed settings
+  base_speed: 150        # Base forward speed
+  max_speed: 200
+  min_speed: 80
+  
+  # Steering
+  max_steering_angle: 45  # degrees
+  steering_sensitivity: 1.0
 
 # Follow Mode Settings
 follow_mode:
-  default_distance: 50  # cm - maintain this distance from target
-  min_distance: 20      # cm - stop if closer than this
-  max_distance: 100     # cm - stop following if further than this
-  angle_tolerance: 0.1  # radians - how centered target must be
-  speed_multiplier: 0.8 # Reduce speed in follow mode for safety
+  default_distance: 50  # cm
+  min_distance: 20      # cm
+  max_distance: 100     # cm
+  angle_tolerance: 0.1  # radians
+  speed_multiplier: 0.8
+
+# Logging
+logging:
+  level: 'INFO'  # DEBUG, INFO, WARNING, ERROR
+  file: 'data/logs/robot.log'
+  max_size: 10485760  # 10MB
+  backup_count: 5
