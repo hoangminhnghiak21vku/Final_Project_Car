@@ -12,12 +12,14 @@ gpiozero==2.0.1
 
 # Computer Vision (optional)
 opencv-python==4.9.0.80
+Pillow==10.1.0
 
 # Configuration
 PyYAML==6.0.1
 
 # Utilities
 numpy==1.26.3
+python-dateutil==2.8.2
 
 # Optional: Web server for production
 # gunicorn==21.2.0
