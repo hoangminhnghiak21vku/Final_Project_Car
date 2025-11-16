@@ -2,6 +2,7 @@
 Main Entry Point - LogisticsBot Control System
 Integrates Flask Web Dashboard with Robot Hardware Control
 Supports Arduino Nano for motor/sensor control
+UPDATED: Picamera2 support for video streaming
 """
 
 from flask import Flask, render_template, Response, jsonify, request
@@ -23,6 +24,7 @@ from drivers.motor.arduino_driver import ArduinoDriver
 from control.robot_controller import RobotController, AutoModeController, FollowModeController
 from utils.logger import setup_logger
 from utils.config_loader import load_config
+from perception.camera_manager import get_web_camera, release_web_camera  # NEW: Picamera2
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -136,37 +138,31 @@ def index():
 
 @app.route('/video_feed')
 def video_feed():
-    """Video streaming route"""
-    def generate():
-        try:
-            camera_config = config.get('sensors', {}).get('camera', {})
-            if not camera_config.get('enabled', True):
-                return
-            
-            camera = cv2.VideoCapture(camera_config.get('device', 0))
-            width, height = camera_config.get('resolution', [320, 240])
-            camera.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            
-            while True:
-                success, frame = camera.read()
-                if not success:
-                    break
-                
-                # TODO: Add AI processing here
-                # - Object detection overlay
-                # - Color tracking box
-                # - Line detection visualization
-                
-                ret, buffer = cv2.imencode('.jpg', frame)
-                frame_bytes = buffer.tobytes()
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        except Exception as e:
-            logger.error(f"Video feed error: {e}")
-    
-    return Response(generate(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    """
+    Video streaming route with Picamera2
+    UPDATED: Now uses CameraManager with Picamera2
+    """
+    try:
+        # Get global camera instance
+        camera = get_web_camera(config)
+        
+        # Start camera if not running
+        if not camera.is_running():
+            if not camera.start():
+                logger.error("Failed to start camera for video feed")
+                return "Camera initialization failed", 500
+        
+        # Return streaming response
+        return Response(
+            camera.generate_frames(),
+            mimetype='multipart/x-mixed-replace; boundary=frame'
+        )
+        
+    except Exception as e:
+        logger.error(f"Video feed error: {e}")
+        import traceback
+        traceback.print_exc()
+        return "Camera error", 500
 
 
 # ===== MODE CONTROL =====
@@ -507,6 +503,11 @@ def main():
     
     logger.info("Hardware initialized successfully")
     
+    # Register cleanup on exit
+    import atexit
+    atexit.register(release_web_camera)
+    atexit.register(lambda: robot_controller.cleanup() if robot_controller else None)
+    
     # Start background task
     socketio.start_background_task(send_sensor_data)
     
@@ -520,6 +521,7 @@ def main():
         logger.info("\nShutting down...")
     finally:
         # Cleanup
+        release_web_camera()
         if robot_controller:
             robot_controller.cleanup()
         logger.info("Cleanup completed. Goodbye!")

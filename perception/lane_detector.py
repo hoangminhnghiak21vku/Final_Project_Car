@@ -1,6 +1,7 @@
 """
-Lane Detection Module
+Lane Detection Module (UPDATED for Picamera2)
 Detects lane-like lines and calculates midline for following
+Now supports RGB input from Picamera2
 """
 
 import cv2
@@ -12,7 +13,7 @@ def detect_line(frame, config=None):
     Detect lane lines and calculate midline position
     
     Args:
-        frame: Input image (BGR format from camera)
+        frame: Input image (RGB format from Picamera2)  # CHANGED: Was BGR, now RGB
         config: Optional configuration dictionary
     
     Returns:
@@ -20,7 +21,7 @@ def detect_line(frame, config=None):
             - error: Horizontal error in pixels (center_x - x_line)
             - x_line: X position of detected lane midline
             - center_x: Frame center X coordinate
-            - frame_debug: Annotated frame for visualization
+            - frame_debug: Annotated frame for visualization (RGB format)
     """
     # Default configuration
     if config is None:
@@ -39,7 +40,7 @@ def detect_line(frame, config=None):
     height, width = frame.shape[:2]
     center_x = width // 2
     
-    # Create debug frame (copy original)
+    # Create debug frame (copy original - already RGB)
     frame_debug = frame.copy()
     
     # Draw center line
@@ -48,7 +49,8 @@ def detect_line(frame, config=None):
     # ===== PREPROCESSING =====
     
     # Convert to grayscale
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    # CHANGED: Was COLOR_BGR2GRAY, now COLOR_RGB2GRAY for Picamera2
+    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
     
     # Apply Gaussian blur to reduce noise
     blur = cv2.GaussianBlur(gray, (config['blur_kernel'], config['blur_kernel']), 0)
@@ -64,8 +66,8 @@ def detect_line(frame, config=None):
     
     roi_vertices = np.array([[
         (0, roi_bottom),
-        (width * 0.3, roi_top),
-        (width * 0.7, roi_top),
+        (int(width * 0.3), roi_top),
+        (int(width * 0.7), roi_top),
         (width, roi_bottom)
     ]], dtype=np.int32)
     
@@ -140,11 +142,11 @@ def detect_line(frame, config=None):
         
         # Calculate x at bottom of frame: y = mx + b => x = (y - b) / m
         b = avg_y - avg_slope * avg_x
-        left_lane_x = int((roi_bottom - b) / avg_slope) if avg_slope != 0 else avg_x
+        left_lane_x = int((roi_bottom - b) / avg_slope) if avg_slope != 0 else int(avg_x)
         
         # Draw left lane
         y1 = roi_top
-        x1 = int((y1 - b) / avg_slope) if avg_slope != 0 else avg_x
+        x1 = int((y1 - b) / avg_slope) if avg_slope != 0 else int(avg_x)
         cv2.line(frame_debug, (x1, y1), (left_lane_x, roi_bottom), (0, 255, 0), 3)
     
     # Calculate right lane position
@@ -157,11 +159,11 @@ def detect_line(frame, config=None):
         avg_y = np.mean([p[1] for p in points])
         
         b = avg_y - avg_slope * avg_x
-        right_lane_x = int((roi_bottom - b) / avg_slope) if avg_slope != 0 else avg_x
+        right_lane_x = int((roi_bottom - b) / avg_slope) if avg_slope != 0 else int(avg_x)
         
         # Draw right lane
         y1 = roi_top
-        x1 = int((y1 - b) / avg_slope) if avg_slope != 0 else avg_x
+        x1 = int((y1 - b) / avg_slope) if avg_slope != 0 else int(avg_x)
         cv2.line(frame_debug, (x1, y1), (right_lane_x, roi_bottom), (0, 255, 0), 3)
     
     # ===== CALCULATE MIDLINE =====
@@ -179,7 +181,7 @@ def detect_line(frame, config=None):
         
     elif left_lane_x is not None:
         # Only left lane detected - estimate midline
-        # Assume lane width (e.g., 100 pixels)
+        # Assume lane width (e.g., 200 pixels)
         estimated_lane_width = 200
         x_line = left_lane_x + estimated_lane_width // 2
         
@@ -230,6 +232,9 @@ def detect_line_simple(frame):
     Simplified lane detection for quick testing
     Uses basic color thresholding
     
+    Args:
+        frame: RGB format from Picamera2  # CHANGED: Was BGR
+    
     Returns:
         tuple: (error, x_line, center_x, frame_debug)
     """
@@ -239,7 +244,8 @@ def detect_line_simple(frame):
     frame_debug = frame.copy()
     
     # Convert to HSV for better color detection
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # CHANGED: Was COLOR_BGR2HSV, now COLOR_RGB2HSV
+    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
     
     # Detect white/yellow lines (typical road markings)
     # White: high value, low saturation

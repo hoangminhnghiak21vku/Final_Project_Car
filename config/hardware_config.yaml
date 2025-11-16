@@ -1,6 +1,7 @@
 # Hardware Configuration for Raspberry Pi 5 + Arduino Uno
 # Robot: 2 rear motors + 1 front universal wheel
 # Lane Detection: Camera ONLY (No IR sensors)
+# UPDATED: Added Picamera2 support
 
 # Control Mode: 'arduino' or 'direct'
 control_mode: 'arduino'
@@ -79,18 +80,34 @@ sensors:
     count: 0
     pins: []
   
-  # Raspberry Pi Camera V2 (PRIMARY - Lane Detection)
+  # Raspberry Pi Camera (PRIMARY - Lane Detection)
+  # UPDATED: Added Picamera2 configuration
   camera:
     enabled: true
-    resolution: [640, 480]  # Higher resolution for better lane detection
-    framerate: 30           # Higher FPS for smoother detection
-    device: 0               # /dev/video0
+    backend: 'picamera2'      # NEW: Specify Picamera2 backend
+    resolution: [640, 480]    # Higher resolution for better lane detection
+    framerate: 30             # Higher FPS for smoother detection
+    device: 0                 # Camera index (not used by Picamera2, but kept for compatibility)
     
-    # Camera settings for lane detection
+    # Legacy camera settings (for reference)
     auto_exposure: true
     brightness: 50
     contrast: 50
     saturation: 50
+    
+    # NEW: Picamera2 specific settings
+    picamera2:
+      format: 'RGB888'        # Color format (RGB888, YUV420, etc.)
+      buffer_count: 4         # Number of buffers for smooth capture
+      
+      # Camera controls (optional - can be tuned)
+      controls:
+        FrameRate: 30         # Target frame rate
+        ExposureTime: null    # Auto exposure (null = auto, or set microseconds)
+        AnalogueGain: 1.0     # Gain multiplier (1.0 = normal)
+        Brightness: 0.0       # Brightness adjustment (-1.0 to 1.0)
+        Contrast: 1.0         # Contrast multiplier (1.0 = normal)
+        Saturation: 1.0       # Saturation multiplier (1.0 = normal)
 
 # AI/Computer Vision Settings
 ai:
