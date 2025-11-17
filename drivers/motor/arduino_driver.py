@@ -72,7 +72,7 @@ class ArduinoDriver:
             )
             
             # Wait for Arduino to boot
-            time.sleep(2)
+            time.sleep(10)
             
             # Flush buffers
             self.serial.reset_input_buffer()
@@ -117,7 +117,7 @@ class ArduinoDriver:
     
     def send_command(self, command: Dict, wait_response: bool = True) -> Optional[Dict]:
         """
-        Send JSON command to Arduino
+        Send JSON command to Arduino (ĐÃ SỬA LỖI LOGIC)
         
         Args:
             command: Command dictionary
@@ -126,8 +126,11 @@ class ArduinoDriver:
         Returns:
             Response dictionary or None
         """
-        if not self.connected or not self.serial:
-            logger.warning("Cannot send command: Not connected to Arduino")
+        # ===== SỬA LỖI 1: Lỗi "Con gà & Quả trứng" =====
+        # Chỉ kiểm tra 'self.serial'. 
+        # 'self.connected' chỉ được set = True SAU KHI PING thành công.
+        if not self.serial:
+            logger.warning("Cannot send command: Serial port not open")
             return None
         
         try:
@@ -142,20 +145,43 @@ class ArduinoDriver:
             
             # Wait for response if requested
             if wait_response:
-                timeout = time.time() + 1.0
+                # Tăng thời gian chờ PING lên 3 giây (an toàn hơn)
+                timeout = time.time() + 3.0 
+                
                 while time.time() < timeout:
                     if self.serial.in_waiting > 0:
-                        line = self.serial.readline().decode('utf-8').strip()
-                        if line:
-                            try:
-                                response = json.loads(line)
-                                logger.debug(f"Received: {response}")
-                                return response
-                            except json.JSONDecodeError:
-                                logger.warning(f"Invalid JSON received: {line}")
-                    time.sleep(0.01)
+                        line = self.serial.readline().decode('utf-8', errors='ignore').strip()
+                        
+                        # Bỏ qua các dòng trống
+                        if not line:
+                            continue
+                            
+                        try:
+                            response = json.loads(line)
+                            
+                            # ===== SỬA LỖI 2: Lỗi "Race Condition" =====
+                            
+                            # Chúng ta đang tìm tin nhắn 'status: ok', KHÔNG phải tin nhắn 'distance'
+                            if 'status' in response and response['status'] == 'ok':
+                                logger.debug(f"Received ACK (PONG): {response}")
+                                return response  # Tìm thấy! Trả về thành công.
+                            
+                            # Nếu đây là tin nhắn cảm biến, hãy bỏ qua và tiếp tục lắng nghe
+                            elif 'distance' in response:
+                                logger.debug(f"Ignoring sensor data while waiting for ACK: {response}")
+                                continue
+                            
+                            # Nếu đó là một JSON lạ khác, hãy bỏ qua
+                            else:
+                                logger.warning(f"Ignoring unknown JSON while waiting for ACK: {response}")
+                                continue
+                            
+                        except json.JSONDecodeError:
+                            logger.warning(f"Invalid JSON received (ignoring): {line}")
+                    
+                    time.sleep(0.01)  # Chờ một chút trước khi kiểm tra lại
                 
-                logger.warning("Command response timeout")
+                logger.warning(f"Command response timeout (Did not receive 'status: ok' for {command})")
                 return None
             
             return {'status': 'sent'}
