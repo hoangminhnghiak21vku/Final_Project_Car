@@ -403,43 +403,43 @@ def clear_log():
 
 def get_sensor_data() -> dict:
     """Get current sensor/robot state"""
+    # Lấy trạng thái từ robot controller (đã bao gồm tốc độ motor)
     state = robot_controller.get_state()
+    
+    # Mặc định (nếu không có dữ liệu)
+    distance_value = 0.0
+    line_sensors = [0] * 8
+    line_pos = 0
+    
+    # Pin (Hiện tại chưa có cảm biến pin, nên để cố định hoặc 0 thay vì random)
+    # Bạn có thể sửa thành 100 hoặc 0 tùy ý để biết đây là giá trị giả định
+    battery_value = 100 
 
-    # Get sensor data from Arduino (if available)
+    # Lấy dữ liệu THẬT từ Arduino (nếu đang dùng chế độ Arduino)
     if isinstance(motor_driver, ArduinoDriver):
         arduino_data = motor_driver.get_sensor_data()
+        
+        # Lấy giá trị thực từ phần cứng
+        distance_value = arduino_data.get("distance", 0.0)
+        line_sensors = arduino_data.get("line", [0] * 8)
+        line_pos = arduino_data.get("line_pos", 0)
+        
+        # Cập nhật tốc độ thực tế từ Arduino (nếu có)
+        if "left_speed" in arduino_data:
+            state["left_motor_speed"] = arduino_data["left_speed"]
+        if "right_speed" in arduino_data:
+            state["right_motor_speed"] = arduino_data["right_speed"]
 
-        # Simulate battery (TODO: Add real battery monitoring)
-        import random
-
-        battery = random.randint(75, 85)
-
-        return {
-            "state": state["state"],
-            "speed": state["speed"],
-            "battery": battery,
-            "left_motor_speed": arduino_data.get("left_speed", 0),
-            "right_motor_speed": arduino_data.get("right_speed", 0),
-            "line_sensors": arduino_data.get("line", [0] * 8),
-            "line_position": arduino_data.get("line_pos", 0),
-            "distance": arduino_data.get("distance", 0.0),
-        }
-    else:
-        # Legacy mode - simulate sensors
-        import random
-
-        battery = random.randint(75, 85)
-
-        return {
-            "state": state["state"],
-            "speed": state["speed"],
-            "battery": battery,
-            "left_motor_speed": state["left_motor_speed"],
-            "right_motor_speed": state["right_motor_speed"],
-            "line_sensors": [False, False, True, True, True, True, False, False],
-            "line_position": 0,
-            "distance": random.uniform(20, 80),
-        }
+    return {
+        "state": state["state"],
+        "speed": state["speed"],
+        "battery": battery_value,  # Không còn random
+        "left_motor_speed": state["left_motor_speed"],
+        "right_motor_speed": state["right_motor_speed"],
+        "line_sensors": line_sensors,
+        "line_position": line_pos,
+        "distance": distance_value, # Dữ liệu thật 100% hoặc 0.0
+    }
 
 
 def get_target_data() -> dict:
