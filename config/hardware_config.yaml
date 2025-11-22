@@ -176,9 +176,9 @@ lane_following:
     integral_limit: 100        # Anti-windup: max integral accumulation
   
   # Speed settings
-  base_speed: 120        # Base forward speed (PWM 0-255)
-  max_speed: 180         # Maximum speed
-  min_speed: 60          # Minimum speed (when correcting heavily)
+  base_speed: 150        # Base forward speed (PWM 0-255)
+  max_speed: 255        # Maximum speed
+  min_speed: 100          # Minimum speed (when correcting heavily)
   
   # Steering settings
   max_steering_angle: 45      # degrees (for reference)

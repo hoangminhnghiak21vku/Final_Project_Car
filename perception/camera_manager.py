@@ -168,11 +168,8 @@ class CameraManager:
         try:
             import cv2
 
-            ret, buffer = cv2.imencode(
-                ".jpg",
-                cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
-                [cv2.IMWRITE_JPEG_QUALITY, quality],
-            )
+            # Frame đã là BGR, nén thẳng luôn
+            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if ret:
                 return buffer.tobytes()
         except Exception as e:
