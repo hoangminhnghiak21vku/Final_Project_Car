@@ -121,9 +121,15 @@ ai:
     roi_bottom_ratio: 1.0   # Bottom 100% of frame
     canny_low: 50
     canny_high: 150
-    hough_threshold: 30     # Lower = more sensitive
-    min_line_length: 40     # Minimum line length in pixels
-    max_line_gap: 100       # Maximum gap between line segments
+    hough_threshold: 20     # Lower = more sensitive // truoc la 30
+    min_line_length: 30     # Minimum line length in pixels // trupc la 40
+    max_line_gap: 20       # Maximum gap between line segments // truoc la 100
+
+    # hough_threshold: 20       # GIẢM từ 40 xuống 20 (Để bắt được vạch mờ/ngắn hơn)
+    # min_line_length: 30       # GIẢM từ 50 xuống 30 (Quan trọng! Để bắt được vạch ngắn)
+    # max_line_gap: 20          # Giữ nguyên số nhỏ này (để tránh nối bậy)
+
+
     blur_kernel: 5          # Gaussian blur kernel size
     
     # Lane tracking
@@ -168,8 +174,8 @@ lane_following:
     kd: 0.3              # Derivative gain (damping, reduces oscillation)
     
     # PID output limits (steering correction)
-    max_output: 150      # Maximum steering correction
-    min_output: -150     # Minimum steering correction
+    max_output: 255      # Maximum steering correction
+    min_output: -255     # Minimum steering correction
     
     # Advanced PID settings
     derivative_smoothing: 0.7  # Smoothing factor for derivative (0-1)

@@ -10,74 +10,59 @@ import numpy as np
 
 def detect_line(frame, config=None):
     """
-    Detect lane lines and calculate midline position
-    
-    Args:
-        frame: Input image (BGR format from Picamera2)
-        config: Optional configuration dictionary
-    
-    Returns:
-        tuple: (error, x_line, center_x, frame_debug)
+    Phát hiện đường line và tính toán lỗi lệch tâm.
+    Phiên bản đã TUNE:
+    - Hough Threshold: 20
+    - Min Line Length: 30
+    - Max Line Gap: 20 (Chặn nối điểm xa)
+    - Slope Filter: > 0.5 (Chặn đường ngang)
+    - Logic Offset: Xử lý khi chỉ thấy 1 vạch
     """
-    # Default configuration
+    # Cấu hình mặc định (đã được tune chuẩn theo kết quả test của bạn)
     if config is None:
         config = {
-            'roi_top_ratio': 0.5,      # Start ROI at 50% from top
-            'roi_bottom_ratio': 1.0,    # End ROI at bottom
+            'roi_top_ratio': 0.5,
+            'roi_bottom_ratio': 1.0,
             'canny_low': 50,
             'canny_high': 150,
-            'hough_threshold': 30,
-            'min_line_length': 40,
-            'max_line_gap': 100,
+            'hough_threshold': 20,    # Đã chỉnh xuống 20
+            'min_line_length': 30,    # Đã chỉnh xuống 30
+            'max_line_gap': 20,       # Đã chỉnh xuống 20 (QUAN TRỌNG)
             'blur_kernel': 5,
         }
-    
-    # Get frame dimensions
+
     height, width = frame.shape[:2]
     center_x = width // 2
     
-    # Create debug frame (copy original)
+    # Tạo ảnh debug
     frame_debug = frame.copy()
-    
-    # Draw center line
-    cv2.line(frame_debug, (center_x, 0), (center_x, height), (0, 255, 255), 2)
-    
-    # ===== PREPROCESSING =====
-    
-    # Convert to grayscale (Input is BGR)
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # <--- ĐÃ SỬA
-    
-    # Apply Gaussian blur to reduce noise
+    cv2.line(frame_debug, (center_x, 0), (center_x, height), (0, 255, 255), 1) # Trục giữa xe (Vàng)
+
+    # 1. Xử lý ảnh
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (config['blur_kernel'], config['blur_kernel']), 0)
-    
-    # Canny edge detection
     edges = cv2.Canny(blur, config['canny_low'], config['canny_high'])
     
-    # ===== REGION OF INTEREST (ROI) =====
-    
-    # Define ROI vertices (trapezoid shape for road/lane)
+    # 2. ROI (Vùng quan tâm)
     roi_top = int(height * config['roi_top_ratio'])
     roi_bottom = int(height * config['roi_bottom_ratio'])
     
+    # Thu hẹp đỉnh hình thang một chút để tránh nhiễu 2 bên lề
     roi_vertices = np.array([[
         (0, roi_bottom),
-        (int(width * 0.3), roi_top),
-        (int(width * 0.7), roi_top),
+        (int(width * 0.4), roi_top),  # Thu vào 0.4
+        (int(width * 0.6), roi_top),  # Thu vào 0.6
         (width, roi_bottom)
     ]], dtype=np.int32)
     
-    # Create mask
     mask = np.zeros_like(edges)
     cv2.fillPoly(mask, roi_vertices, 255)
-    
-    # Apply mask
     masked_edges = cv2.bitwise_and(edges, mask)
     
-    # Draw ROI on debug frame
+    # Vẽ ROI lên ảnh debug
     cv2.polylines(frame_debug, roi_vertices, True, (255, 0, 0), 2)
-    
-    # ===== HOUGH LINE DETECTION =====
-    
+
+    # 3. Hough Transform
     lines = cv2.HoughLinesP(
         masked_edges,
         rho=1,
@@ -87,110 +72,95 @@ def detect_line(frame, config=None):
         maxLineGap=config['max_line_gap']
     )
     
-    # Check if any lines detected
-    if lines is None or len(lines) == 0:
-        return 0, center_x, center_x, frame_debug
-    
-    # ===== SEPARATE LEFT AND RIGHT LANES =====
-    
+    # Phân loại vạch trái/phải
     left_lines = []
     right_lines = []
     
-    for line in lines:
-        x1, y1, x2, y2 = line[0]
-        
-        # Calculate slope
-        if x2 - x1 == 0:  # Vertical line
-            continue
-        
-        slope = (y2 - y1) / (x2 - x1)
-        
-        # Filter by slope (avoid horizontal lines)
-        if abs(slope) < 0.3:
-            continue
-        
-        # Classify as left or right based on position and slope
-        line_center_x = (x1 + x2) / 2
-        
-        if line_center_x < center_x and slope < 0:
-            left_lines.append((x1, y1, x2, y2, slope))
-        elif line_center_x > center_x and slope > 0:
-            right_lines.append((x1, y1, x2, y2, slope))
-    
-    # ===== CALCULATE LANE BOUNDARIES =====
-    
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            
+            if x2 - x1 == 0:
+                slope = 999.0 # Vô cực
+            else:
+                slope = (y2 - y1) / (x2 - x1)
+            
+            # --- BỘ LỌC ĐỘ DỐC (Đã sửa thành 0.5) ---
+            if abs(slope) < 0.5:
+                continue
+            
+            # Phân loại dựa trên vị trí và dấu của độ dốc
+            # Vạch trái: nằm bên trái tâm VÀ slope âm (nghiêng /)
+            # Vạch phải: nằm bên phải tâm VÀ slope dương (nghiêng \)
+            if slope < 0 and x1 < center_x:
+                left_lines.append((x1, y1, x2, y2))
+            elif slope > 0 and x2 > center_x:
+                right_lines.append((x1, y1, x2, y2))
+
+    # 4. Tính toán vị trí vạch (Trung bình cộng)
     left_lane_x = None
     right_lane_x = None
     
-    # Calculate left lane position
     if left_lines:
-        slopes = [line[4] for line in left_lines]
-        points = [(line[0], line[1]) for line in left_lines]
-        
-        avg_slope = np.mean(slopes)
-        avg_x = np.mean([p[0] for p in points])
-        avg_y = np.mean([p[1] for p in points])
-        
-        b = avg_y - avg_slope * avg_x
-        left_lane_x = int((roi_bottom - b) / avg_slope) if avg_slope != 0 else int(avg_x)
-        
-        y1 = roi_top
-        x1 = int((y1 - b) / avg_slope) if avg_slope != 0 else int(avg_x)
-        cv2.line(frame_debug, (x1, y1), (left_lane_x, roi_bottom), (0, 255, 0), 3)
-    
-    # Calculate right lane position
+        # Lấy trung bình tọa độ x tại đáy ảnh (y = height)
+        # Công thức suy diễn: x = x1 + (height - y1) / slope
+        x_bottoms = []
+        for x1, y1, x2, y2 in left_lines:
+            slope = (y2 - y1) / (x2 - x1)
+            x_bottom = x1 + (height - y1) / slope
+            x_bottoms.append(x_bottom)
+            # Vẽ từng đoạn tìm được để debug
+            cv2.line(frame_debug, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+        left_lane_x = int(np.mean(x_bottoms))
+
     if right_lines:
-        slopes = [line[4] for line in right_lines]
-        points = [(line[0], line[1]) for line in right_lines]
-        
-        avg_slope = np.mean(slopes)
-        avg_x = np.mean([p[0] for p in points])
-        avg_y = np.mean([p[1] for p in points])
-        
-        b = avg_y - avg_slope * avg_x
-        right_lane_x = int((roi_bottom - b) / avg_slope) if avg_slope != 0 else int(avg_x)
-        
-        y1 = roi_top
-        x1 = int((y1 - b) / avg_slope) if avg_slope != 0 else int(avg_x)
-        cv2.line(frame_debug, (x1, y1), (right_lane_x, roi_bottom), (0, 255, 0), 3)
+        x_bottoms = []
+        for x1, y1, x2, y2 in right_lines:
+            slope = (y2 - y1) / (x2 - x1)
+            x_bottom = x1 + (height - y1) / slope
+            x_bottoms.append(x_bottom)
+            cv2.line(frame_debug, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            
+        right_lane_x = int(np.mean(x_bottoms))
+
+    # 5. ===== LOGIC TÍNH TÂM ĐƯỜNG (SỬA ĐỔI QUAN TRỌNG NHẤT) =====
     
-    # ===== CALCULATE MIDLINE =====
+    # Giả định độ rộng đường (đo trên ảnh Straight debug của bạn)
+    # Khoảng cách giữa 2 chấm xanh ~ 220 pixel
+    LANE_WIDTH = 310 
     
     if left_lane_x is not None and right_lane_x is not None:
+        # Trường hợp hoàn hảo: Thấy cả 2
         x_line = (left_lane_x + right_lane_x) // 2
-        cv2.line(frame_debug, (x_line, roi_top), (x_line, roi_bottom), (255, 0, 255), 3)
-        cv2.circle(frame_debug, (left_lane_x, roi_bottom), 8, (0, 255, 0), -1)
-        cv2.circle(frame_debug, (right_lane_x, roi_bottom), 8, (0, 255, 0), -1)
+        cv2.circle(frame_debug, (left_lane_x, height), 10, (0, 255, 0), -1)
+        cv2.circle(frame_debug, (right_lane_x, height), 10, (0, 255, 0), -1)
         
     elif left_lane_x is not None:
-        estimated_lane_width = 200
-        x_line = left_lane_x + estimated_lane_width // 2
-        cv2.line(frame_debug, (x_line, roi_top), (x_line, roi_bottom), (255, 165, 0), 3)
-        cv2.putText(frame_debug, "LEFT ONLY", (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
+        # Chỉ thấy TRÁI -> Tâm = Trái + (Rộng/2)
+        x_line = left_lane_x + (LANE_WIDTH // 2)
+        cv2.circle(frame_debug, (left_lane_x, height), 10, (0, 255, 0), -1)
+        cv2.putText(frame_debug, "LEFT ONLY", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         
     elif right_lane_x is not None:
-        estimated_lane_width = 200
-        x_line = right_lane_x - estimated_lane_width // 2
-        cv2.line(frame_debug, (x_line, roi_top), (x_line, roi_bottom), (255, 165, 0), 3)
-        cv2.putText(frame_debug, "RIGHT ONLY", (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
+        # Chỉ thấy PHẢI -> Tâm = Phải - (Rộng/2)
+        x_line = right_lane_x - (LANE_WIDTH // 2)
+        cv2.circle(frame_debug, (right_lane_x, height), 10, (0, 255, 0), -1)
+        cv2.putText(frame_debug, "RIGHT ONLY", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        
     else:
+        # Mất cả 2 -> Giữ nguyên hướng cũ hoặc đi thẳng (Center)
         x_line = center_x
-        cv2.putText(frame_debug, "NO LANE DETECTED", (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        cv2.putText(frame_debug, "NO LANE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+    # Tính sai số
+    error = x_line - center_x
     
-    # ===== CALCULATE ERROR =====
-    
-    error = center_x - x_line
-    
-    cv2.arrowedLine(frame_debug, (center_x, height - 50), 
-                   (x_line, height - 50), (0, 0, 255), 3, tipLength=0.3)
-    
-    error_text = f"Error: {error:+d} px"
-    cv2.putText(frame_debug, error_text, (10, height - 20), 
-               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-    
+    # Vẽ hướng đi
+    cv2.line(frame_debug, (x_line, 0), (x_line, height), (255, 0, 255), 2) # Tâm đường ảo (Tím)
+    cv2.arrowedLine(frame_debug, (center_x, height-20), (x_line, height-20), (0, 0, 255), 2)
+    cv2.putText(frame_debug, f"Err: {error}", (10, height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+
     return error, x_line, center_x, frame_debug
 
 
