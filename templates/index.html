@@ -1,313 +1,101 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LogisticsBot Control Panel</title>
-    
-    <!-- Bootstrap 5 CSS -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <!-- Custom CSS -->
-    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <title>Simple Auto Car</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        /* CSS nội bộ (Inline CSS) để không cần file style.css riêng */
+        body { 
+            font-family: sans-serif; 
+            text-align: center; 
+            background: #222; 
+            color: #fff; 
+            margin: 0; 
+            padding: 20px; 
+        }
+        
+        /* Khung hiển thị Video */
+        img { 
+            width: 100%; 
+            max-width: 640px; 
+            height: auto;
+            border: 3px solid #444; 
+            border-radius: 8px; 
+            background: #000; /* Nền đen khi chưa có video */
+        }
+        
+        /* Nút bấm to, rõ ràng, dễ ấn trên điện thoại */
+        button {
+            display: block;
+            width: 100%;
+            max-width: 300px;
+            margin: 30px auto;
+            padding: 20px; 
+            font-size: 22px; 
+            font-weight: bold;
+            color: white; 
+            background: #28a745; /* Màu xanh (Chạy) */
+            border: none; 
+            border-radius: 10px; 
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        /* Trạng thái nút Dừng */
+        button.stop { 
+            background: #dc3545; /* Màu đỏ (Dừng) */
+            animation: pulse 2s infinite; /* Hiệu ứng nhấp nháy nhẹ */
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(220, 53, 69, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 53, 69, 0); }
+        }
+    </style>
 </head>
 <body>
-    <div class="main-container">
-        <!-- Top Navigation Bar -->
-        <nav class="top-navbar">
-            <div class="navbar-left">
-                <i class="fas fa-robot"></i>
-                <h1>LogisticsBot Control Panel</h1>
-            </div>
-            <div class="navbar-right">
-                <button class="nav-btn" title="User Profile">
-                    <i class="fas fa-user"></i>
-                </button>
-                <button class="nav-btn" title="Settings">
-                    <i class="fas fa-cog"></i>
-                </button>
-                <div class="connection-badge" id="connectionBadge">
-                    <i class="fas fa-bolt"></i>
-                    <span id="connectionText">Connecting...</span>
-                </div>
-            </div>
-        </nav>
-
-        <!-- Main Content Grid -->
-        <div class="content-grid">
-            <!-- Row 1: Video + Status -->
-            <div class="grid-row-1">
-                <!-- Video Stream Card -->
-                <div class="panel video-panel">
-                    <div class="panel-header">
-                        <i class="fas fa-video"></i> VIDEO STREAM
-                        <span class="stream-info">320x240 @ 20fps</span>
-                    </div>
-                    <div class="panel-body video-body">
-                        <div class="video-frame">
-                            <img src="/video_feed" alt="Camera Feed" id="videoStream">
-                            <div class="ai-overlay" id="aiOverlay">
-                                <span class="overlay-tag">AI Detection Active</span>
-                            </div>
-                            <!-- Target Tracking Overlay -->
-                            <div class="target-overlay" id="targetOverlay" style="display: none;">
-                                <div class="target-box" id="targetBox"></div>
-                                <div class="target-label" id="targetLabel">Target: Red</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- System Status Card -->
-                <div class="panel status-panel">
-                    <div class="panel-header">
-                        <i class="fas fa-chart-bar"></i> SYSTEM STATUS
-                    </div>
-                    <div class="panel-body status-body">
-                        <div class="status-item">
-                            <div class="status-label">
-                                <span class="status-dot" id="stateDot"></span>
-                                State
-                            </div>
-                            <div class="status-value" id="stateValue">IDLE</div>
-                        </div>
-
-                        <div class="status-item">
-                            <div class="status-label">Speed</div>
-                            <div class="progress-container">
-                                <div class="progress-bar" id="speedBar" style="width: 70%"></div>
-                                <span class="progress-text" id="speedValue">180/255</span>
-                            </div>
-                        </div>
-
-                        <div class="status-item">
-                            <div class="status-label">Battery</div>
-                            <div class="progress-container battery">
-                                <div class="progress-bar" id="batteryBar" style="width: 78%"></div>
-                                <span class="progress-text" id="batteryValue">78%</span>
-                            </div>
-                        </div>
-
-                        <!-- NEW: Target Distance -->
-                        <div class="status-item" id="targetDistanceItem" style="display: none;">
-                            <div class="status-label">
-                                <i class="fas fa-bullseye"></i>
-                                Target Distance
-                            </div>
-                            <div class="status-value" id="targetDistanceValue">-- cm</div>
-                        </div>
-
-                        <!-- NEW: Tracking Status -->
-                        <div class="status-item" id="trackingStatusItem" style="display: none;">
-                            <div class="status-label">
-                                <i class="fas fa-crosshairs"></i>
-                                Tracking
-                            </div>
-                            <div class="status-value" id="trackingStatusValue">
-                                <span class="tracking-badge tracking-lost">Lost Target</span>
-                            </div>
-                        </div>
-
-                        <!-- NEW: Detection Confidence -->
-                        <div class="status-item" id="confidenceItem" style="display: none;">
-                            <div class="status-label">Confidence</div>
-                            <div class="progress-container confidence">
-                                <div class="progress-bar" id="confidenceBar" style="width: 0%"></div>
-                                <span class="progress-text" id="confidenceValue">0%</span>
-                            </div>
-                        </div>
-
-                        <div class="status-item">
-                            <div class="status-label">Uptime</div>
-                            <div class="status-value" id="uptimeValue">0h 0m</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Row 2: Manual Control -->
-            <div class="panel control-panel">
-                <div class="panel-header">
-                    <i class="fas fa-gamepad"></i> CONTROL CENTER
-                </div>
-                <div class="panel-body control-body">
-                    <div class="control-left">
-                        <div class="control-pad" id="controlPad">
-                            <button class="ctrl-btn btn-up" onclick="sendCommand('forward')">
-                                <i class="fas fa-chevron-up"></i>
-                            </button>
-                            <button class="ctrl-btn btn-left" onclick="sendCommand('left')">
-                                <i class="fas fa-chevron-left"></i>
-                            </button>
-                            <button class="ctrl-btn btn-center" onclick="sendCommand('stop')">
-                                <i class="fas fa-circle"></i>
-                            </button>
-                            <button class="ctrl-btn btn-right" onclick="sendCommand('right')">
-                                <i class="fas fa-chevron-right"></i>
-                            </button>
-                            <button class="ctrl-btn btn-down" onclick="sendCommand('backward')">
-                                <i class="fas fa-chevron-down"></i>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="control-right">
-                        <!-- Mode Selection -->
-                        <div class="control-item">
-                            <label><i class="fas fa-cog"></i> Mode:</label>
-                            <div class="mode-selector">
-                                <label class="mode-option">
-                                    <input type="radio" name="mode" value="manual" id="modeManual" checked onchange="toggleMode()">
-                                    <span>Manual</span>
-                                </label>
-                                <label class="mode-option">
-                                    <input type="radio" name="mode" value="auto" id="modeAuto" onchange="toggleMode()">
-                                    <span>Auto</span>
-                                </label>
-                                <label class="mode-option">
-                                    <input type="radio" name="mode" value="follow" id="modeFollow" onchange="toggleMode()">
-                                    <span>Follow</span>
-                                </label>
-                            </div>
-                        </div>
-
-                        <!-- Speed Control -->
-                        <div class="control-item">
-                            <label><i class="fas fa-tachometer-alt"></i> Speed:</label>
-                            <input type="range" class="speed-slider" id="speedSlider" min="0" max="255" value="180">
-                            <span class="speed-display" id="speedDisplay">180</span>
-                        </div>
-
-                        <!-- Follow Mode Settings -->
-                        <div class="follow-settings" id="followSettings" style="display: none;">
-                            <!-- Color Selector -->
-                            <div class="control-item">
-                                <label><i class="fas fa-palette"></i> Target Color:</label>
-                                <div class="color-selector">
-                                    <button class="color-btn color-red active" data-color="red" onclick="selectColor('red')"></button>
-                                    <button class="color-btn color-green" data-color="green" onclick="selectColor('green')"></button>
-                                    <button class="color-btn color-blue" data-color="blue" onclick="selectColor('blue')"></button>
-                                    <button class="color-btn color-yellow" data-color="yellow" onclick="selectColor('yellow')"></button>
-                                    <button class="color-btn color-orange" data-color="orange" onclick="selectColor('orange')"></button>
-                                </div>
-                            </div>
-
-                            <!-- Follow Distance -->
-                            <div class="control-item">
-                                <label><i class="fas fa-ruler"></i> Follow Distance:</label>
-                                <input type="range" class="distance-slider" id="followDistanceSlider" min="20" max="100" value="50">
-                                <span class="distance-display" id="followDistanceDisplay">50 cm</span>
-                            </div>
-                        </div>
-
-                        <!-- Emergency Stop -->
-                        <button class="emergency-btn" onclick="emergencyStop()">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            EMERGENCY STOP
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Row 3: Sensors -->
-            <div class="grid-row-3">
-                <!-- Line Sensors -->
-                <div class="panel sensor-panel">
-                    <div class="panel-header">
-                        <i class="fas fa-road"></i> LINE SENSORS
-                    </div>
-                    <div class="panel-body sensor-body">
-                        <div class="line-sensor-display" id="lineSensors">
-                            <span class="sensor-bar"></span>
-                            <span class="sensor-bar"></span>
-                            <span class="sensor-bar active"></span>
-                            <span class="sensor-bar active"></span>
-                            <span class="sensor-bar active"></span>
-                            <span class="sensor-bar active"></span>
-                            <span class="sensor-bar"></span>
-                            <span class="sensor-bar"></span>
-                        </div>
-                        <div class="sensor-info">
-                            Position: <strong id="linePosition">+2</strong>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Ultrasonic Sensor -->
-                <div class="panel sensor-panel">
-                    <div class="panel-header">
-                        <i class="fas fa-radar"></i> ULTRASONIC
-                    </div>
-                    <div class="panel-body sensor-body">
-                        <div class="distance-display">
-                            <div class="distance-value" id="ultrasonicValue">45.2</div>
-                            <div class="distance-unit">cm</div>
-                        </div>
-                        <div class="distance-indicator">
-                            <div class="distance-bar" id="distanceBar" style="width: 45%"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Target Info (NEW) -->
-                <div class="panel detection-panel">
-                    <div class="panel-header">
-                        <i class="fas fa-crosshairs"></i> TARGET INFO
-                    </div>
-                    <div class="panel-body target-info-body">
-                        <div class="target-info-item">
-                            <div class="info-label">Target Color:</div>
-                            <div class="info-value" id="targetColorInfo">Red</div>
-                        </div>
-                        <div class="target-info-item">
-                            <div class="info-label">Position:</div>
-                            <div class="info-value" id="targetPositionInfo">
-                                <span id="targetX">--</span>, <span id="targetY">--</span>
-                            </div>
-                        </div>
-                        <div class="target-info-item">
-                            <div class="info-label">Distance:</div>
-                            <div class="info-value" id="targetDistanceInfo">-- cm</div>
-                        </div>
-                        <div class="target-info-item">
-                            <div class="info-label">Confidence:</div>
-                            <div class="info-value" id="targetConfidenceInfo">--</div>
-                        </div>
-                        <div class="target-info-item">
-                            <div class="info-label">Status:</div>
-                            <div class="info-value">
-                                <span class="tracking-badge tracking-lost" id="targetStatusBadge">Lost</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Row 4: Activity Log -->
-            <div class="panel log-panel">
-                <div class="panel-header">
-                    <i class="fas fa-list"></i> ACTIVITY LOG
-                    <button class="header-btn" onclick="clearLog()">Clear</button>
-                </div>
-                <div class="panel-body log-body">
-                    <div class="log-content" id="logContent">
-                        <div class="log-entry log-info">
-                            <span class="log-time">--:--:--</span>
-                            <span class="log-level">INFO</span>
-                            <span class="log-message">System initialized</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+    <h1>🚘 Camera View</h1>
+    
+    <div>
+        <img src="/video_feed" alt="Waiting for Camera..." id="videoStream">
     </div>
 
-    <!-- Bootstrap JS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
-    <!-- Socket.IO Client -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
-    <!-- Custom JS -->
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <button id="btnToggle" onclick="toggleAuto()">START AUTO MODE</button>
+
+    <script>
+        // JavaScript thuần (Vanilla JS) để gọi API bật/tắt
+        function toggleAuto() {
+            const btn = document.getElementById('btnToggle');
+            
+            // Hiệu ứng phản hồi tức thì để người dùng biết đã bấm
+            btn.style.opacity = "0.7";
+            
+            fetch('/toggle_auto')
+                .then(res => res.json())
+                .then(data => {
+                    btn.style.opacity = "1";
+                    if (data.state === 'RUNNING') {
+                        btn.innerText = "🛑 STOP AUTO MODE";
+                        btn.className = 'stop';
+                    } else {
+                        btn.innerText = "🚀 START AUTO MODE";
+                        btn.className = '';
+                    }
+                })
+                .catch(err => {
+                    btn.style.opacity = "1";
+                    alert("Lỗi kết nối: " + err);
+                });
+        }
+        
+        // Tự động tải lại trang nếu video bị đứng (Optional)
+        document.getElementById('videoStream').onerror = function() {
+            console.log("Video stream lost, retrying...");
+            setTimeout(() => {
+                this.src = "/video_feed?" + new Date().getTime();
+            }, 2000);
+        };
+    </script>
 </body>
 </html>

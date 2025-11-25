@@ -1,513 +1,195 @@
 """
-Robot Controller - Interface between Web Dashboard and Motor Driver
-Handles commands from Flask app and controls motors
-Updated with PID-based Auto Mode, YOLOv11 NCNN and Picamera2 support
+Robot Controller - Lite Version
+Features: Auto Mode with Lane Following, Sign Recognition & Obstacle Avoidance
 """
 
 import threading
 import time
 import logging
-import numpy as np
-from typing import Optional
-from datetime import datetime
-
-# Import PID, lane detection and Object Detector
-import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).parent.parent))
-
-from control.pid_controller import PIDController
 from perception.lane_detector import detect_line
-# Import get_web_camera để dùng chung camera với Web
-from perception.camera_manager import CameraManager, get_web_camera 
+from perception.camera_manager import get_web_camera
 from perception.object_detector import ObjectDetector
+from control.pid_controller import PIDController
 
 logger = logging.getLogger(__name__)
 
-
 class RobotController:
-    """
-    Main robot controller
-    Manages motor control, safety, and state
-    """
-    
     def __init__(self, motor_driver, config: dict):
         self.driver = motor_driver
         self.config = config
+        self.is_running = False
+        self.thread = None
         
-        # Current state
-        self.current_mode = 'manual'
-        self.current_state = 'IDLE'
-        self.current_speed = 180
+        # 1. Cấu hình An Toàn (Ultrasonic)
+        safety_cfg = config.get('safety', {})
+        self.SAFE_DISTANCE = safety_cfg.get('min_safe_distance', 25.0) # 25cm để kịp né
+        self.is_avoiding = False # Cờ trạng thái né tránh
         
-        # Safety
-        self.emergency_stopped = False
-        self.last_command_time = time.time()
-        self.timeout = config.get('safety', {}).get('timeout', 5.0)
-        
-        # Watchdog thread
-        self.running = True
-        self.watchdog_thread = threading.Thread(target=self._watchdog, daemon=True)
-        self.watchdog_thread.start()
-        
-        logger.info("Robot Controller initialized")
-    
-    def set_mode(self, mode: str):
-        if mode in ['manual', 'auto', 'follow']:
-            self.current_mode = mode
-            if mode == 'auto': self.current_state = 'AUTO MODE'
-            elif mode == 'follow': self.current_state = 'FOLLOW MODE'
-            else: self.current_state = 'IDLE'
-            logger.info(f"Mode changed to: {mode}")
-            return True
-        return False
-    
-    def set_speed(self, speed: int):
-        self.current_speed = max(0, min(255, speed))
-        logger.info(f"Speed set to: {self.current_speed}")
-    
-    def forward(self):
-        if not self._check_manual_mode(): return False
-        self.driver.forward(self.current_speed)
-        self.current_state = 'MOVING FORWARD'
-        self._update_command_time()
-        return True
-    
-    def backward(self):
-        if not self._check_manual_mode(): return False
-        self.driver.backward(self.current_speed)
-        self.current_state = 'MOVING BACKWARD'
-        self._update_command_time()
-        return True
-    
-    def left(self):
-        if not self._check_manual_mode(): return False
-        turn_speed = int(self.current_speed * 0.8)
-        self.driver.turn_left(turn_speed)
-        self.current_state = 'TURNING LEFT'
-        self._update_command_time()
-        return True
-    
-    def right(self):
-        if not self._check_manual_mode(): return False
-        turn_speed = int(self.current_speed * 0.8)
-        self.driver.turn_right(turn_speed)
-        self.current_state = 'TURNING RIGHT'
-        self._update_command_time()
-        return True
-    
-    def stop(self):
-        self.driver.stop()
-        if self.current_mode == 'manual': self.current_state = 'STOPPED'
-        elif self.current_mode == 'auto': self.current_state = 'AUTO MODE'
-        elif self.current_mode == 'follow': self.current_state = 'FOLLOW MODE'
-        self._update_command_time()
-        return True
-    
-    def emergency_stop(self):
-        self.driver.stop()
-        self.emergency_stopped = True
-        self.current_state = 'EMERGENCY STOP'
-        logger.warning("EMERGENCY STOP ACTIVATED")
-        return True
-    
-    def reset_emergency(self):
-        self.emergency_stopped = False
-        self.current_state = 'IDLE'
-        logger.info("Emergency stop reset")
-    
-    def get_state(self) -> dict:
-        left_speed, right_speed = self.driver.get_speeds()
-        return {
-            'mode': self.current_mode,
-            'state': self.current_state,
-            'speed': self.current_speed,
-            'emergency_stopped': self.emergency_stopped,
-            'left_motor_speed': left_speed,
-            'right_motor_speed': right_speed,
-            'last_command_age': time.time() - self.last_command_time
-        }
-    
-    def _check_manual_mode(self) -> bool:
-        if self.emergency_stopped:
-            logger.warning("Cannot execute command: Emergency stop active")
-            return False
-        if self.current_mode != 'manual':
-            logger.warning(f"Cannot execute command: Not in manual mode (current: {self.current_mode})")
-            return False
-        return True
-    
-    def _update_command_time(self):
-        self.last_command_time = time.time()
-    
-    def _watchdog(self):
-        while self.running:
-            time.sleep(0.5)
-            age = time.time() - self.last_command_time
-            if age > self.timeout and self.current_mode == 'manual':
-                left, right = self.driver.get_speeds()
-                if left != 0 or right != 0:
-                    logger.warning(f"Command timeout ({age:.1f}s) - Auto stopping motors")
-                    self.stop()
-            if self.current_state in ['MOVING FORWARD', 'MOVING BACKWARD', 'TURNING LEFT', 'TURNING RIGHT']:
-                left, right = self.driver.get_speeds()
-                if left == 0 and right == 0:
-                    self.current_state = 'IDLE'
-    
-    def cleanup(self):
-        self.running = False
-        self.driver.cleanup()
-        logger.info("Robot Controller cleaned up")
-
-
-class AutoModeController:
-    """
-    Autonomous mode controller
-    Combines Lane Following (PID) and Traffic Sign Recognition (YOLOv11)
-    """
-    
-    def __init__(self, robot_controller: RobotController):
-        self.robot = robot_controller
-        self.running = False
-        self.thread: Optional[threading.Thread] = None
-        self.camera: Optional[CameraManager] = None
-        
-        # AI Detector
+        # 2. AI & PID
         self.detector = ObjectDetector(model_path='data/models/best_ncnn_model', conf_threshold=0.5)
         
-        # PID
-        pid_config = robot_controller.config.get('lane_following', {}).get('pid', {})
+        pid_cfg = config.get('lane_following', {}).get('pid', {})
         self.pid = PIDController(
-            kp=pid_config.get('kp', 0.8),
-            ki=pid_config.get('ki', 0.0),
-            kd=pid_config.get('kd', 0.3),
-            output_min=pid_config.get('min_output', -255),
-            output_max=pid_config.get('max_output', 255),
-            derivative_smoothing=pid_config.get('derivative_smoothing', 0.7)
+            kp=pid_cfg.get('kp', 0.8), ki=pid_cfg.get('ki', 0.0), kd=pid_cfg.get('kd', 0.3),
+            output_min=-255, output_max=255
         )
         
-        # Lane settings
-        lane_config = robot_controller.config.get('lane_following', {})
-        self.base_speed = lane_config.get('base_speed', 150)
+        # 3. Cài đặt Tốc độ
+        lane_cfg = config.get('lane_following', {})
+        self.base_speed = lane_cfg.get('base_speed', 150)
         self.default_speed = self.base_speed
-        self.max_speed = lane_config.get('max_speed', 255)
-        self.min_speed = lane_config.get('min_speed', 60)
-        self.detection_config = robot_controller.config.get('ai', {}).get('lane_detection', {})
+        self.detection_config = config.get('ai', {}).get('lane_detection', {})
         
-        # --- CẤU HÌNH KHOẢNG CÁCH BIỂN BÁO (THEO YÊU CẦU: 140px - 170px) ---
-        self.DIST_PREPARE = 140  # < 140px: Chưa làm gì
-        self.DIST_EXECUTE = 170  # 140px - 170px: Vùng hành động
+        # 4. Khoảng cách Biển báo (Pixel)
+        self.DIST_PREPARE = 140
+        self.DIST_EXECUTE = 170
         
-        self.lane_lost_count = 0
-        self.lane_lost_threshold = 10
-        self.latest_debug_frame = None
-        self.latest_error = 0
-        self.latest_correction = 0
-        
-        logger.info("Auto Mode Controller initialized with YOLOv11 & Distance Logic")
-    
+        # Camera (Singleton)
+        self.camera = None
+
     def start(self):
-        if not self.running:
-            if not self._init_shared_camera(): return False
-            self.pid.reset()
-            self.lane_lost_count = 0
+        if not self.is_running:
+            self.camera = get_web_camera(self.config)
+            if not self.camera.is_running(): self.camera.start()
+            
+            self.is_running = True
             self.base_speed = self.default_speed
-            self.running = True
+            self.pid.reset()
+            self.is_avoiding = False
+            
             self.thread = threading.Thread(target=self._auto_loop, daemon=True)
             self.thread.start()
-            logger.info("Auto mode started")
-            return True
-        return False
-    
+            logger.info(f"Auto Mode Started (Safe Dist: {self.SAFE_DISTANCE}cm)")
+
     def stop(self):
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=2.0)
-        self.robot.driver.stop()
-        logger.info("Auto mode stopped")
-    
-    def _init_shared_camera(self) -> bool:
-        try:
-            self.camera = get_web_camera(self.robot.config)
-            if not self.camera.is_running():
-                if not self.camera.start():
-                    logger.error("Failed to start camera")
-                    return False
-            return True
-        except Exception as e:
-            logger.error(f"Camera init error: {e}")
-            return False
-    
+        self.is_running = False
+        if self.thread: self.thread.join(timeout=1.0)
+        self.driver.stop()
+        logger.info("Auto Mode Stopped")
+
+    def cleanup(self):
+        self.stop()
+        self.driver.cleanup()
+
+    def perform_avoidance_maneuver(self):
+        """
+        Kịch bản né vật cản: Dừng -> Lùi -> Rẽ Trái -> Vượt -> Về Làn
+        """
+        logger.warning(">>> STARTING AVOIDANCE MANEUVER <<<")
+        self.is_avoiding = True
+        
+        # 1. Dừng khẩn cấp
+        self.driver.stop()
+        time.sleep(0.5)
+        
+        # 2. Lùi lại (để có không gian đánh lái)
+        logger.info("Avoid: Reversing...")
+        self.driver.backward(130)
+        time.sleep(0.8)
+        
+        # 3. Rẽ Trái (Né)
+        logger.info("Avoid: Turning Left...")
+        self.driver.turn_left(180)
+        time.sleep(0.6)
+        
+        # 4. Đi Thẳng (Vượt qua vật cản)
+        logger.info("Avoid: Passing...")
+        self.driver.forward(150)
+        time.sleep(1.2)
+        
+        # 5. Rẽ Phải (Quay về làn)
+        logger.info("Avoid: Returning to lane...")
+        self.driver.turn_right(180)
+        time.sleep(0.5)
+        
+        # 6. Ổn định
+        self.driver.stop()
+        time.sleep(0.2)
+        
+        self.is_avoiding = False
+        self.pid.reset() # Reset PID để tránh bị giật khi bắt lại làn
+        logger.warning(">>> AVOIDANCE COMPLETE <<<")
+
     def _auto_loop(self):
-        logger.info("Auto loop started")
         prev_time = time.time()
         
-        while self.running:
+        while self.is_running:
             try:
-                if self.robot.current_mode != 'auto': break
+                # --- 0. KIỂM TRA VẬT CẢN (Ưu tiên số 1) ---
+                distance = self.driver.get_distance()
                 
+                if 0 < distance < self.SAFE_DISTANCE and not self.is_avoiding:
+                    logger.warning(f"OBSTACLE DETECTED: {distance}cm")
+                    # Thực hiện né tránh (Hàm này sẽ chặn luồng trong vài giây)
+                    self.perform_avoidance_maneuver()
+                    continue
+                # ------------------------------------------
+
+                # 1. Lấy ảnh Camera
                 frame = self.camera.capture_frame()
                 if frame is None:
                     time.sleep(0.1)
                     continue
-                
-                detections, debug_frame = self.detector.detect(frame)
-                
+
+                # 2. Nhận diện Biển Báo
+                detections, _ = self.detector.detect(frame)
                 sign_action = None
+                
                 if detections:
                     sign = max(detections, key=lambda x: x['w'] * x['h'])
-                    sign_name = sign['class_name']
-                    sign_size = max(sign['w'], sign['h']) # Lấy cạnh lớn nhất
+                    name = sign['class_name']
+                    size = max(sign['w'], sign['h'])
                     
-                    self.robot.current_state = f"SIGN: {sign_name} ({sign_size:.0f}px)"
-                    
-                    # --- LOGIC KHOẢNG CÁCH ---
-                    
-                    # 1. Quá xa (< 140px): Chỉ chuẩn bị
-                    if sign_size < self.DIST_PREPARE:
-                        pass
-                    
-                    # 2. Quá gần (> 190px): Đã đi qua -> Bỏ qua
-                    elif sign_size > self.DIST_EXECUTE + 20:
-                        pass
-                    
-                    # 3. VÙNG HÀNH ĐỘNG (140px - 170px)
-                    else:
-                        logger.info(f"EXECUTING ACTION FOR: {sign_name} (Size: {sign_size:.0f})")
+                    # Logic khoảng cách biển báo
+                    if self.DIST_PREPARE <= size <= self.DIST_EXECUTE:
+                        logger.info(f"Action for: {name}")
                         
-                        if sign_name in ['stop_sign', 'red_light']:
-                            self.robot.driver.stop()
+                        if name in ['stop_sign', 'red_light']:
+                            self.driver.stop()
                             sign_action = "STOP"
                             time.sleep(0.1)
                             
-                        elif sign_name == 'green_light':
-                            self.base_speed = self.default_speed
-                            pass
-                            
-                        elif sign_name == 'left_turn_sign':
-                            self.robot.driver.turn_left(150)
+                        elif name == 'left_turn_sign':
+                            self.driver.turn_left(150)
                             sign_action = "TURN"
                             time.sleep(1.5)
                             
-                        elif sign_name == 'right_turn_sign':
-                            self.robot.driver.turn_right(150)
+                        elif name == 'right_turn_sign':
+                            self.driver.turn_right(150)
                             sign_action = "TURN"
                             time.sleep(1.5)
-                            
-                        elif sign_name == 'speed_limit_signs':
-                            self.base_speed = 100
                         
-                        elif sign_name == 'parking_signs':
-                            self.robot.driver.stop()
-                            self.stop()
-                            break
+                        elif name == 'speed_limit_signs':
+                            self.base_speed = 100
+                            
+                        elif name == 'green_light':
+                            self.base_speed = self.default_speed
 
-                if sign_action in ["STOP", "TURN"]:
-                    continue
+                if sign_action: continue
 
-                # Lane Following
-                error, x_line, center_x, lane_debug_frame = detect_line(frame, self.detection_config)
-                self.latest_debug_frame = lane_debug_frame 
-                self.latest_error = error
+                # 3. Chạy theo làn (Lane Following)
+                error, _, _, _ = detect_line(frame, self.detection_config)
                 
-                current_time = time.time()
-                dt = current_time - prev_time
-                prev_time = current_time
-                
+                # Kiểm tra mất làn
                 if abs(error) > frame.shape[1] * 0.4:
-                    self.lane_lost_count += 1
-                    if self.lane_lost_count >= self.lane_lost_threshold:
-                        self.robot.driver.stop()
-                        self.robot.current_state = 'LANE LOST'
-                        continue
-                else:
-                    self.lane_lost_count = 0
-                    if not detections: self.robot.current_state = 'FOLLOWING LANE'
+                     pass 
+                
+                # PID
+                cur_time = time.time()
+                dt = cur_time - prev_time
+                prev_time = cur_time
                 
                 correction = self.pid.compute(error, dt)
-                self.latest_correction = correction
                 
-                left_speed = self.base_speed - correction
-                right_speed = self.base_speed + correction
+                left = max(-255, min(255, int(self.base_speed - correction)))
+                right = max(-255, min(255, int(self.base_speed + correction)))
                 
-                left_speed = max(self.min_speed, min(self.max_speed, int(left_speed)))
-                right_speed = max(self.min_speed, min(self.max_speed, int(right_speed)))
-                
-                self.robot.driver.set_motors(left_speed, right_speed)
+                self.driver.set_motors(left, right)
                 time.sleep(0.03)
-                
+
             except Exception as e:
-                logger.error(f"Error in auto loop: {e}")
-                self.robot.driver.stop()
+                logger.error(f"Loop error: {e}")
+                self.driver.stop()
                 break
         
-        self.robot.driver.stop()
-        logger.info("Auto loop ended")
-
-    def get_debug_frame(self):
-        return self.latest_debug_frame
-    
-    def get_pid_status(self):
-        return {'error': self.latest_error, 'correction': self.latest_correction, **self.pid.get_components()}
-
-
-class FollowModeController:
-    """
-    Follow mode controller
-    Uses YOLOv11 to track specific colored objects (6cm x 6cm targets)
-    """
-    
-    def __init__(self, robot_controller: RobotController):
-        self.robot = robot_controller
-        self.running = False
-        self.thread: Optional[threading.Thread] = None
-        
-        # Camera - Sử dụng Singleton Instance
-        self.camera: Optional[CameraManager] = None
-        
-        # AI Detector
-        self.detector = ObjectDetector(model_path='data/models/best_ncnn_model', conf_threshold=0.5)
-        
-        self.color_map = {
-            'red': 'red_color',
-            'green': 'green_color',
-            'blue': 'blue_color',
-            'yellow': 'yellow_color'
-        }
-        self.target_color_name = 'red'
-        self.pid_turn = PIDController(kp=0.6, ki=0.0, kd=0.2, output_max=150)
-        
-        # --- CẤU HÌNH KHOẢNG CÁCH FOLLOW (Vật 6cm x 6cm) ---
-        # Dựa trên calibration của bạn: 140px - 170px tương ứng 40-60cm
-        self.SIZE_FORWARD = 150   # < 140px (Xa > 60cm) -> TIẾN
-        self.SIZE_STOP    = 160   # > 170px (Gần < 40cm) -> DỪNG
-        self.SIZE_BACK    = 170   # > 200px (Quá gần < 30cm) -> LÙI
-        
-        # Web Info
-        self.target_x = 0
-        self.target_y = 0
-        self.target_w = 0
-        self.target_h = 0
-        self.confidence = 0
-        self.target_distance = 0
-        
-        logger.info("Follow Mode Controller initialized with YOLO")
-    
-    def start(self):
-        if not self.running:
-            if not self._init_shared_camera(): return False
-            self.running = True
-            self.thread = threading.Thread(target=self._follow_loop, daemon=True)
-            self.thread.start()
-            logger.info(f"Follow mode started: {self.target_color_name}")
-            return True
-        return False
-    
-    def stop(self):
-        self.running = False
-        if self.thread: self.thread.join(timeout=2.0)
-        self.robot.driver.stop()
-        logger.info("Follow mode stopped")
-    
-    def set_target_color(self, color: str):
-        self.target_color_name = color
-        logger.info(f"Target color changed to: {color} (Class: {self.color_map.get(color)})")
-    
-    def set_follow_distance(self, distance: int):
-        pass 
-    
-    def get_target_data(self) -> dict:
-        return {
-            'tracking': self.confidence > 0,
-            'target_color': self.target_color_name,
-            'target_x': self.target_x,
-            'target_y': self.target_y,
-            'target_w': self.target_w,
-            'target_h': self.target_h,
-            'confidence': self.confidence,
-            'target_distance': self.target_distance
-        }
-    
-    def _init_shared_camera(self) -> bool:
-        try:
-            self.camera = get_web_camera(self.robot.config)
-            if not self.camera.is_running():
-                if not self.camera.start(): return False
-            return True
-        except Exception as e:
-            logger.error(f"Camera init error: {e}")
-            return False
-
-    def _follow_loop(self):
-        logger.info(f"Follow loop started. Tracking: {self.color_map.get(self.target_color_name)}")
-        
-        while self.running:
-            try:
-                if self.robot.current_mode != 'follow': break
-                
-                frame = self.camera.capture_frame()
-                if frame is None:
-                    time.sleep(0.1)
-                    continue
-                
-                detections, _ = self.detector.detect(frame)
-                target_class = self.color_map.get(self.target_color_name)
-                valid_objs = [d for d in detections if d['class_name'] == target_class]
-                
-                if valid_objs:
-                    # Chọn vật to nhất (gần nhất)
-                    target = max(valid_objs, key=lambda x: x['w'] * x['h'])
-                    
-                    # 1. PID Rẽ (Steering)
-                    center_x = frame.shape[1] / 2
-                    error_x = center_x - target['x']
-                    turn_output = self.pid_turn.compute(error_x)
-                    
-                    # 2. Điều khiển Tốc độ (Distance)
-                    # Lấy kích thước lớn nhất (cạnh 6cm) để so sánh chính xác
-                    obj_size = max(target['w'], target['h'])
-                    
-                    if obj_size < self.SIZE_FORWARD:
-                        # Vật nhỏ (< 140px) -> Xa -> Tiến nhanh
-                        forward_speed = 180 
-                        
-                    elif obj_size > self.SIZE_BACK:
-                        # Vật quá to (> 200px) -> Quá gần -> Lùi lại
-                        forward_speed = -120
-                        
-                    elif obj_size > self.SIZE_STOP:
-                        # Vật hơi to (> 170px) -> Hơi gần -> Dừng
-                        forward_speed = 0
-                        
-                    else:
-                        # Ở giữa 140-170px -> Khoảng cách vàng -> Dừng/Giữ vị trí
-                        forward_speed = 0
-                    
-                    # Trộn tín hiệu (Clamp -255 đến 255)
-                    left_speed = max(-255, min(255, int(forward_speed + turn_output)))
-                    right_speed = max(-255, min(255, int(forward_speed - turn_output)))
-                    
-                    self.robot.driver.set_motors(left_speed, right_speed)
-                    self.robot.current_state = f"TRACKING {target['class_name']} ({obj_size:.0f}px)"
-                    
-                    # Update Web
-                    self.target_x = int(target['x'])
-                    self.target_y = int(target['y'])
-                    self.target_w = int(target['w'])
-                    self.target_h = int(target['h'])
-                    self.confidence = int(target['conf'] * 100)
-                    
-                else:
-                    self.robot.driver.stop()
-                    self.robot.current_state = "SEARCHING..."
-                    self.confidence = 0
-                
-                time.sleep(0.05)
-                
-            except Exception as e:
-                logger.error(f"Follow loop error: {e}")
-                self.robot.driver.stop()
-                break
-        
-        self.robot.driver.stop()
-        logger.info("Follow loop ended")
+        self.driver.stop()
