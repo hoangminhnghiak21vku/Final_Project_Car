@@ -7,13 +7,13 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 class ObjectDetector:
-    def __init__(self, model_path='data/models/best_ncnn_model', conf_threshold=0.5):
+    def __init__(self, model_path='data/models/best.onnx', conf_threshold=0.5):
         self.model = None
         self.conf_threshold = conf_threshold
         
         if os.path.exists(model_path):
             try:
-                logger.info(f"Loading NCNN model from {model_path}...")
+                logger.info(f"Loading ONNX model from {model_path}...")
                 # task='detect' để tránh cảnh báo
                 self.model = YOLO(model_path, task='detect')
                 logger.info("Model loaded successfully!")

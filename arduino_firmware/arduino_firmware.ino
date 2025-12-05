@@ -1,33 +1,30 @@
 /*
  * Arduino Uno Firmware - LogisticsBot Controller (Camera Only)
- * 
- * Handles:
+ * * Handles:
  * - L298N Motor Control (PWM + Direction)
  * - HC-SR04 Ultrasonic Sensor (Obstacle Detection)
  * - UART Communication with Raspberry Pi
- * 
- * NO IR LINE SENSORS - Camera does all lane detection
- * 
- * Communication: JSON protocol over Serial (115200 baud)
+ * * NO IR LINE SENSORS - Camera does all lane detection
+ * * Communication: JSON protocol over Serial (115200 baud)
  */
 
 #include <ArduinoJson.h>
 
-// ===== MOTOR PIN DEFINITIONS =====
+// ===== MOTOR PIN DEFINITIONS (UPDATED) =====
 // Left Motor
-#define ENA 9   // PWM Left Motor Speed
-#define IN1 2   // Left Motor Direction 1
-#define IN2 3   // Left Motor Direction 2
+#define ENA 5   // PWM Left Motor Speed
+#define IN1 10  // Left Motor Direction 1
+#define IN2 11  // Left Motor Direction 2
 
 // Right Motor
-#define ENB 10  // PWM Right Motor Speed
-#define IN3 4   // Right Motor Direction 1
-#define IN4 5   // Right Motor Direction 2
+#define ENB 6   // PWM Right Motor Speed
+#define IN3 12  // Right Motor Direction 1
+#define IN4 13  // Right Motor Direction 2
 
-// ===== SENSOR PIN DEFINITIONS =====
+// ===== SENSOR PIN DEFINITIONS (UPDATED) =====
 // HC-SR04 Ultrasonic Sensor (Obstacle Detection Only)
-#define ULTRASONIC_TRIG  12
-#define ULTRASONIC_ECHO  11
+#define ULTRASONIC_TRIG  8
+#define ULTRASONIC_ECHO  7
 
 // ===== GLOBAL VARIABLES =====
 int leftSpeed = 0;
@@ -106,7 +103,7 @@ void processCommand() {
     sendAck("STOP");
   }
   else if (strcmp(cmd, "SET_SPEED") == 0) {
-    int speed = doc["value"] | 0;
+    // int speed = doc["value"] | 0; // Not used directly here, speed is set via MOVE
     sendAck("SET_SPEED");
   }
   else if (strcmp(cmd, "GET_SENSORS") == 0) {
@@ -133,9 +130,10 @@ void setMotors(int left, int right) {
     analogWrite(ENA, leftSpeed);
   }
   else if (leftSpeed < 0) {
-    // Backward
+    // Backward - Handle negative speed properly
     digitalWrite(IN1, LOW);
     digitalWrite(IN2, HIGH);
+    // Use abs() or multiply by -1 to get positive PWM value
     analogWrite(ENA, -leftSpeed);
   }
   else {

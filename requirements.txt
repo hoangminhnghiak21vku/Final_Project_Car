@@ -3,7 +3,7 @@ Flask==3.0.0
 Flask-SocketIO==5.3.6
 python-socketio==5.10.0
 
-# GPIO for Raspberry Pi 5 (thay thế RPi.GPIO)
+# GPIO for Raspberry Pi 4 (thay thế RPi.GPIO)
 #gpiozero==2.0.1
 picamera2
 # Optional: pigpio for hardware PWM (better performance)

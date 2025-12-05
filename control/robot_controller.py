@@ -1,195 +1,400 @@
 """
-Robot Controller - Lite Version
-Features: Auto Mode with Lane Following, Sign Recognition & Obstacle Avoidance
+Robot Controller - AUTO MODE ONLY VERSION
 """
 
 import threading
 import time
 import logging
-from perception.lane_detector import detect_line
-from perception.camera_manager import get_web_camera
-from perception.object_detector import ObjectDetector
+import numpy as np
+from typing import Optional
+import sys
+from pathlib import Path
+
+# Add project root to path
+sys.path.append(str(Path(__file__).parent.parent))
+
 from control.pid_controller import PIDController
+from perception.lane_detector import detect_line
+from perception.camera_manager import CameraManager, get_web_camera 
+from perception.object_detector import ObjectDetector
+from perception.imu_sensor_fusion import IMUSensorFusion
+
 
 logger = logging.getLogger(__name__)
 
 class RobotController:
+    """
+    Main robot controller - Auto Mode Only
+    """
+    
     def __init__(self, motor_driver, config: dict):
         self.driver = motor_driver
         self.config = config
-        self.is_running = False
-        self.thread = None
         
-        # 1. Cấu hình An Toàn (Ultrasonic)
-        safety_cfg = config.get('safety', {})
-        self.SAFE_DISTANCE = safety_cfg.get('min_safe_distance', 25.0) # 25cm để kịp né
-        self.is_avoiding = False # Cờ trạng thái né tránh
+        # State
+        self.is_auto_running = False
+        self.current_state = 'IDLE'
+        self.current_speed = config.get('lane_following', {}).get('base_speed', 150)
+        self.emergency_stopped = False
         
-        # 2. AI & PID
-        self.detector = ObjectDetector(model_path='data/models/best_ncnn_model', conf_threshold=0.5)
-        
-        pid_cfg = config.get('lane_following', {}).get('pid', {})
-        self.pid = PIDController(
-            kp=pid_cfg.get('kp', 0.8), ki=pid_cfg.get('ki', 0.0), kd=pid_cfg.get('kd', 0.3),
-            output_min=-255, output_max=255
-        )
-        
-        # 3. Cài đặt Tốc độ
-        lane_cfg = config.get('lane_following', {})
-        self.base_speed = lane_cfg.get('base_speed', 150)
-        self.default_speed = self.base_speed
-        self.detection_config = config.get('ai', {}).get('lane_detection', {})
-        
-        # 4. Khoảng cách Biển báo (Pixel)
-        self.DIST_PREPARE = 140
-        self.DIST_EXECUTE = 170
-        
-        # Camera (Singleton)
-        self.camera = None
+        # IMU Initialization
+        try:
+            self.imu = IMUSensorFusion()
+            if self.imu.connected:
+                self.imu.start()
+                logger.info("✅ IMU initialized successfully")
+            else:
+                logger.warning("⚠️ IMU not connected! Smart turn will use fallback mode.")
+                self.imu = None
+        except Exception as e:
+            logger.error(f"❌ IMU initialization failed: {e}")
+            self.imu = None
 
-    def start(self):
-        if not self.is_running:
-            self.camera = get_web_camera(self.config)
-            if not self.camera.is_running(): self.camera.start()
-            
-            self.is_running = True
-            self.base_speed = self.default_speed
-            self.pid.reset()
-            self.is_avoiding = False
-            
-            self.thread = threading.Thread(target=self._auto_loop, daemon=True)
-            self.thread.start()
-            logger.info(f"Auto Mode Started (Safe Dist: {self.SAFE_DISTANCE}cm)")
 
+        logger.info("Robot Controller initialized (Auto Mode Only)")
+    
+    def set_auto_mode(self, enabled: bool):
+        """Enable or disable autonomous driving"""
+        if self.emergency_stopped and enabled:
+            logger.warning("Cannot start Auto Mode: Emergency Stop Active")
+            return False
+
+        self.is_auto_running = enabled
+        if enabled:
+            self.current_state = 'AUTO DRIVING'
+            logger.info("🚗 Auto Mode STARTED")
+        else:
+            self.current_state = 'IDLE'
+            self.stop()
+            logger.info("🛑 Auto Mode STOPPED")
+        return True
+
+    def set_speed(self, speed: int):
+        self.current_speed = max(0, min(255, speed))
+        logger.info(f"Base speed set to: {self.current_speed}")
+    
     def stop(self):
-        self.is_running = False
-        if self.thread: self.thread.join(timeout=1.0)
         self.driver.stop()
-        logger.info("Auto Mode Stopped")
+        self.current_state = 'STOPPED'
+    
+    def emergency_stop(self):
+        self.driver.stop()
+        self.is_auto_running = False
+        self.emergency_stopped = True
+        self.current_state = 'EMERGENCY STOP'
+        logger.warning("🚨 EMERGENCY STOP ACTIVATED")
+        return True
+    
+    def reset_emergency(self):
+        self.emergency_stopped = False
+        self.current_state = 'IDLE'
+        logger.info("Emergency stop reset")
+    
+    def smart_turn(self, target_angle: float, speed: int = 220, timeout: float = 5.0):
+        """Executes a precision turn using IMU"""
+        # Safety checks
+        if self.emergency_stopped: return
+
+        if speed < 170: speed = 170
+        if speed > 255: speed = 255
+        
+        logger.info(f"🔄 Smart Turn START: Target {target_angle}°")
+        
+        # Check IMU availability
+        if not hasattr(self, 'imu') or self.imu is None or not self.imu.connected:
+            self._fallback_turn(target_angle, speed)
+            return
+        
+        try:
+            self.imu.reset_yaw()
+            start_time = time.time()
+            last_yaw = 0.0
+            stuck_counter = 0
+            
+            # Initial kick to start movement
+            if target_angle > 0:
+                self.driver.turn_left(speed)
+            else:
+                self.driver.turn_right(speed)
+            
+            while True:
+                if self.emergency_stopped: break
+
+                current_yaw = self.imu.get_yaw()
+                error = abs(target_angle) - abs(current_yaw)
+                
+                # Target reached
+                if error <= 2.0:
+                    break
+                
+                # Timeout
+                if time.time() - start_time > timeout:
+                    logger.warning("Smart turn timeout")
+                    break
+                
+                # Stuck detection (yaw hasn't changed significantly in 0.5s)
+                # 0.1 degree threshold might be too sensitive to noise, increased slightly to 0.5
+                if abs(current_yaw - last_yaw) < 0.05:
+                    stuck_counter += 1
+                    if stuck_counter > 50: # 50 * 0.01s = 0.5s
+                        logger.warning("Robot stuck during turn")
+                        break
+                else:
+                    stuck_counter = 0
+                last_yaw = current_yaw
+                
+                # Adaptive Speed control for smoother landing
+                if error > 30:
+                    turn_speed = speed
+                elif error > 10:
+                    turn_speed = int(speed * 0.7)
+                else:
+                    turn_speed = max(130, int(speed * 0.5)) # Slow down at end
+                
+                if target_angle > 0:
+                    self.driver.turn_left(turn_speed)
+                else:
+                    self.driver.turn_right(turn_speed)
+                
+                time.sleep(0.01)
+            
+        except Exception as e:
+            logger.error(f"Error during smart turn: {e}")
+        finally:
+            self.driver.stop()
+            time.sleep(0.2)
+
+    def _fallback_turn(self, target_angle: float, speed: int):
+        # Rough estimate: 90 degrees takes ~0.6s at full speed (tune this)
+        duration = 0.6 * (abs(target_angle) / 90.0)
+        if target_angle > 0:
+            self.driver.turn_left(speed)
+        else:
+            self.driver.turn_right(speed)
+        time.sleep(duration)
+        self.driver.stop()
+
+    def get_state(self) -> dict:
+        left_speed, right_speed = self.driver.get_speeds()
+        return {
+            'mode': 'auto' if self.is_auto_running else 'idle',
+            'state': self.current_state,
+            'speed': self.current_speed,
+            'emergency_stopped': self.emergency_stopped,
+            'left_motor_speed': left_speed,
+            'right_motor_speed': right_speed,
+            'imu_status': "Connected" if (self.imu and self.imu.connected) else "Disconnected"
+        }
 
     def cleanup(self):
-        self.stop()
+        self.is_auto_running = False
+        if self.imu: self.imu.stop()
         self.driver.cleanup()
+        logger.info("Robot Controller cleaned up")
 
-    def perform_avoidance_maneuver(self):
-        """
-        Kịch bản né vật cản: Dừng -> Lùi -> Rẽ Trái -> Vượt -> Về Làn
-        """
-        logger.warning(">>> STARTING AVOIDANCE MANEUVER <<<")
-        self.is_avoiding = True
+
+class AutoModeController:
+    """
+    Autonomous driving logic (Lane Following + Traffic Signs)
+    """
+    
+    def __init__(self, robot_controller: RobotController):
+        self.robot = robot_controller
+        self.running = False
+        self.thread: Optional[threading.Thread] = None
+        self.camera: Optional[CameraManager] = None
         
-        # 1. Dừng khẩn cấp
-        self.driver.stop()
-        time.sleep(0.5)
+        # Load AI Models
+        self.detector = ObjectDetector(
+            model_path='data/models/best.onnx', 
+            conf_threshold=0.5
+        )
         
-        # 2. Lùi lại (để có không gian đánh lái)
-        logger.info("Avoid: Reversing...")
-        self.driver.backward(130)
-        time.sleep(0.8)
+        # PID Config
+        pid_config = robot_controller.config.get('lane_following', {}).get('pid', {})
+        self.pid = PIDController(
+            kp=pid_config.get('kp', 0.8),
+            ki=pid_config.get('ki', 0.0),
+            kd=pid_config.get('kd', 0.3),
+            output_min=pid_config.get('min_output', -255),
+            output_max=pid_config.get('max_output', 255),
+            derivative_smoothing=pid_config.get('derivative_smoothing', 0.7)
+        )
         
-        # 3. Rẽ Trái (Né)
-        logger.info("Avoid: Turning Left...")
-        self.driver.turn_left(180)
-        time.sleep(0.6)
-        
-        # 4. Đi Thẳng (Vượt qua vật cản)
-        logger.info("Avoid: Passing...")
-        self.driver.forward(150)
-        time.sleep(1.2)
-        
-        # 5. Rẽ Phải (Quay về làn)
-        logger.info("Avoid: Returning to lane...")
-        self.driver.turn_right(180)
-        time.sleep(0.5)
-        
-        # 6. Ổn định
-        self.driver.stop()
-        time.sleep(0.2)
-        
-        self.is_avoiding = False
-        self.pid.reset() # Reset PID để tránh bị giật khi bắt lại làn
-        logger.warning(">>> AVOIDANCE COMPLETE <<<")
+        self.detection_config = robot_controller.config.get('ai', {}).get('lane_detection', {})
+        self.lane_lost_count = 0
+        self.DIST_EXECUTE = 170
+        self.DIST_PREPARE = 140
+        self.base_speed = self.robot.current_speed
+        self.default_speed = self.base_speed
+
+        logger.info("Auto Mode Controller initialized")
+    
+    def start(self):
+        if not self.running:
+            try:
+                self.camera = get_web_camera(self.robot.config)
+                if not self.camera.is_running():
+                    if not self.camera.start(): return False
+            except Exception as e:
+                logger.error(f"Camera init error: {e}")
+                return False
+            
+            self.pid.reset()
+            self.lane_lost_count = 0
+            self.base_speed = self.robot.current_speed # Update speed on start
+            self.default_speed = self.base_speed
+
+            self.running = True
+            self.thread = threading.Thread(target=self._auto_loop, daemon=True)
+            self.thread.start()
+            logger.info("Auto Mode Thread Started")
+            return True
+        return False
+    
+    def stop(self):
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=2.0)
+        self.robot.driver.stop()
+        logger.info("Auto Mode Thread Stopped")
+    
+    def _safe_wait(self, duration: float):
+        """Wait for duration but check for emergency stop"""
+        end_time = time.time() + duration
+        while time.time() < end_time:
+            if self.robot.emergency_stopped or not self.robot.is_auto_running:
+                return False
+            time.sleep(0.1)
+        return True
 
     def _auto_loop(self):
-        prev_time = time.time()
+        logger.info("Auto loop started")
         
-        while self.is_running:
-            try:
-                # --- 0. KIỂM TRA VẬT CẢN (Ưu tiên số 1) ---
-                distance = self.driver.get_distance()
-                
-                if 0 < distance < self.SAFE_DISTANCE and not self.is_avoiding:
-                    logger.warning(f"OBSTACLE DETECTED: {distance}cm")
-                    # Thực hiện né tránh (Hàm này sẽ chặn luồng trong vài giây)
-                    self.perform_avoidance_maneuver()
-                    continue
-                # ------------------------------------------
+        # Debounce/Consistency check for signs
+        sign_consistency_count = 0
+        last_sign_name = None
 
-                # 1. Lấy ảnh Camera
+        while self.running:
+            try:
+                # Check if auto mode is actually enabled
+                if not self.robot.is_auto_running or self.robot.emergency_stopped:
+                    time.sleep(0.1)
+                    continue
+                
                 frame = self.camera.capture_frame()
                 if frame is None:
                     time.sleep(0.1)
                     continue
-
-                # 2. Nhận diện Biển Báo
-                detections, _ = self.detector.detect(frame)
-                sign_action = None
                 
-                if detections:
-                    sign = max(detections, key=lambda x: x['w'] * x['h'])
-                    name = sign['class_name']
-                    size = max(sign['w'], sign['h'])
+                # 1. Traffic Sign Detection
+                detections, _ = self.detector.detect(frame)
+                sign_action = None 
+                
+                # Filter low confidence detections (Redundant check if config handles it, but safe)
+                valid_detections = [d for d in detections if d['conf'] > 0.6]
+
+                if valid_detections:
+                    sign = max(valid_detections, key=lambda x: x['w'] * x['h'])
+                    sign_name = sign['class_name']
+                    sign_size = max(sign['w'], sign['h'])
                     
-                    # Logic khoảng cách biển báo
-                    if self.DIST_PREPARE <= size <= self.DIST_EXECUTE:
-                        logger.info(f"Action for: {name}")
-                        
-                        if name in ['stop_sign', 'red_light']:
-                            self.driver.stop()
-                            sign_action = "STOP"
-                            time.sleep(0.1)
-                            
-                        elif name == 'left_turn_sign':
-                            self.driver.turn_left(150)
-                            sign_action = "TURN"
-                            time.sleep(1.5)
-                            
-                        elif name == 'right_turn_sign':
-                            self.driver.turn_right(150)
-                            sign_action = "TURN"
-                            time.sleep(1.5)
-                        
-                        elif name == 'speed_limit_signs':
-                            self.base_speed = 100
-                            
-                        elif name == 'green_light':
-                            self.base_speed = self.default_speed
+                    # Consistency check: Sign must appear in consecutive frames
+                    if sign_name == last_sign_name:
+                        sign_consistency_count += 1
+                    else:
+                        sign_consistency_count = 0
+                        last_sign_name = sign_name
 
-                if sign_action: continue
+                    # Only act if sign is consistent (e.g. seen 2+ times)
+                    if sign_consistency_count >= 1:
+                        self.robot.current_state = f"SIGN: {sign_name} ({sign_size:.0f}px)"
+                        
+                        # Logic based on sign size/distance
+                        if sign_size < self.DIST_PREPARE:
+                            pass # Too far
+                        elif sign_size > self.DIST_EXECUTE + 50:
+                            pass # Too close/passed
+                        else:
+                            # Execute Action
+                            logger.info(f"🚦 EXECUTING: {sign_name} (Size: {sign_size:.0f})")
+                            
+                            if sign_name in ['stop', 'red_right']:
+                                self.robot.driver.stop()
+                                sign_action = "STOP"
+                                self.robot.current_state = "STOPPING..."
+                                
+                                # Use safe wait instead of simple sleep
+                                if not self._safe_wait(2.0): break 
+                                
+                                # Reset consistency to avoid immediate re-trigger
+                                sign_consistency_count = 0 
+                            
+                            elif sign_name == 'green_light':
+                                self.base_speed = self.default_speed
+                            
+                            elif sign_name == 'turn_left':
+                                logger.info("⬅️ Left Turn detected -> Smart Turn +90°")
+                                self.robot.smart_turn(90, speed=220)
+                                sign_action = "TURN"
+                                sign_consistency_count = 0
+                                continue 
+                                
+                            
+                            elif sign_name == 'turn_right':
+                                logger.info("➡️ Right Turn detected -> Smart Turn -90°")
+                                self.robot.smart_turn(-90, speed=220)
+                                sign_action = "TURN"
+                                sign_consistency_count = 0
+                                continue
+                            
+                            
+                            
+                            elif sign_name == 'parking':
+                                self.robot.driver.stop()
+                                self.robot.set_auto_mode(False)
+                                sign_action = "STOP"
+                                break 
+                else:
+                    # Reset consistency if no sign seen
+                    sign_consistency_count = 0
+                    last_sign_name = None
+                    if self.robot.current_state.startswith("SIGN:") or self.robot.current_state == "STOPPING...":
+                        self.robot.current_state = 'AUTO DRIVING'
+                
+                if sign_action in ["STOP", "TURN"]:
+                    continue
 
-                # 3. Chạy theo làn (Lane Following)
+                # 2. Lane Following
                 error, _, _, _ = detect_line(frame, self.detection_config)
                 
-                # Kiểm tra mất làn
+                # Handle Lane Loss
                 if abs(error) > frame.shape[1] * 0.4:
-                     pass 
+                    self.lane_lost_count += 1
+                    if self.lane_lost_count >= 10:
+                        self.robot.driver.stop()
+                        self.robot.current_state = 'LANE LOST'
+                        continue
+                else:
+                    self.lane_lost_count = 0
+                    # Only update state if not showing sign info
+                    if not valid_detections:
+                        self.robot.current_state = 'AUTO DRIVING'
                 
-                # PID
-                cur_time = time.time()
-                dt = cur_time - prev_time
-                prev_time = cur_time
+                # PID Calculation
+                correction = self.pid.compute(error, dt=0.05)
                 
-                correction = self.pid.compute(error, dt)
+                current_base_speed = self.base_speed 
                 
-                left = max(-255, min(255, int(self.base_speed - correction)))
-                right = max(-255, min(255, int(self.base_speed + correction)))
+                left_speed = max(-255, min(255, int(current_base_speed - correction)))
+                right_speed = max(-255, min(255, int(current_base_speed + correction)))
                 
-                self.driver.set_motors(left, right)
+                self.robot.driver.set_motors(left_speed, right_speed)
                 time.sleep(0.03)
-
+                
             except Exception as e:
-                logger.error(f"Loop error: {e}")
-                self.driver.stop()
-                break
+                logger.error(f"Auto loop error: {e}")
+                self.robot.driver.stop()
         
-        self.driver.stop()
+        self.robot.driver.stop()
+        logger.info("Auto loop ended")

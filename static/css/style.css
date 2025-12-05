@@ -1,0 +1,196 @@
+:root {
+    --primary-color: #2196f3;
+    --bg-color: #1e3c72;
+    --panel-bg: rgba(255, 255, 255, 0.95);
+    --text-color: #333;
+    /* Tăng chiều cao hàng 1 để video to hơn */
+    --row1-height: 550px; 
+}
+
+body {
+    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+    font-family: 'Segoe UI', sans-serif;
+    color: var(--text-color);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+.main-container { padding-bottom: 20px; }
+
+/* Navbar */
+.top-navbar {
+    background: rgba(20, 30, 48, 0.95);
+    padding: 15px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: white;
+    border-bottom: 2px solid rgba(255,255,255,0.1);
+}
+
+.navbar-left { display: flex; align-items: center; gap: 15px; font-size: 1.2rem; font-weight: bold; }
+.connection-badge {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4caf50;
+    padding: 5px 15px;
+    border-radius: 20px;
+    border: 1px solid #4caf50;
+}
+.connection-badge.offline { background: rgba(244, 67, 54, 0.2); color: #f44336; border-color: #f44336; }
+
+/* Grid Layout */
+.content-grid {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 1600px; /* Tăng max-width để tận dụng màn hình rộng */
+    margin: 0 auto;
+}
+
+.grid-row-1 {
+    display: grid;
+    /* Điều chỉnh tỉ lệ cột để video chiếm nhiều không gian hơn (ví dụ 3 phần video, 1 phần control) */
+    grid-template-columns: 3fr 1fr; 
+    gap: 20px;
+    height: var(--row1-height); /* Sử dụng biến chiều cao mới */
+}
+
+.grid-row-2 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+/* Panels */
+.panel {
+    background: var(--panel-bg);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%; /* Đảm bảo panel chiếm hết chiều cao grid cell */
+}
+
+.panel-header {
+    background: #f1f5f9;
+    padding: 12px 20px;
+    font-weight: bold;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0; /* Header không bị co lại */
+}
+
+.panel-body { 
+    padding: 0; /* Xóa padding mặc định để video tràn viền panel body */
+    flex: 1; 
+    display: flex; 
+    flex-direction: column; 
+    overflow: hidden; /* Ẩn phần thừa */
+    position: relative;
+}
+
+/* Status Panel Body cần padding riêng vì video panel body đã xóa padding */
+.status-panel .panel-body, .telemetry-panel .panel-body {
+    padding: 20px;
+    overflow-y: auto; /* Cho phép cuộn nếu nội dung dài */
+}
+
+
+/* Video Specific Styles - CHỈNH SỬA CHO VIDEO TO HƠN */
+.video-panel .panel-body {
+    background: #000; /* Nền đen cho video */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.video-frame {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    display: flex;       /* Để căn giữa ảnh */
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.video-frame img { 
+    width: 100%; 
+    height: 100%; 
+    object-fit: contain; /* Giữ tỉ lệ khung hình, có thể có viền đen */
+    /* Hoặc dùng object-fit: cover; nếu muốn lấp đầy khung hình nhưng có thể bị cắt ảnh */
+}
+
+.ai-overlay { 
+    position: absolute; 
+    top: 15px; 
+    left: 15px; 
+    display: flex; 
+    gap: 8px; 
+    z-index: 10;
+}
+
+.overlay-tag { 
+    background: rgba(33, 150, 243, 0.8); 
+    color: white; 
+    padding: 4px 10px; 
+    border-radius: 4px; 
+    font-size: 0.85rem; 
+    font-weight: 600;
+    backdrop-filter: blur(4px);
+}
+
+/* Controls */
+.control-group { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+.status-label { font-weight: 600; color: #666; }
+.form-switch .form-check-input { width: 3em; height: 1.5em; cursor: pointer; }
+
+/* Sliders */
+.speed-slider { width: 100%; margin: 10px 0; }
+.speed-value { text-align: center; font-weight: bold; color: var(--primary-color); font-size: 1.2rem; }
+
+/* Progress Bars */
+.progress-container { background: #e0e0e0; height: 10px; border-radius: 5px; width: 100%; overflow: hidden; }
+.progress-bar { background: #4caf50; height: 100%; transition: width 0.3s; }
+
+/* Emergency Button */
+.emergency-btn {
+    width: 100%;
+    padding: 15px;
+    background: linear-gradient(45deg, #ff3547, #ff6b6b);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: transform 0.2s;
+    box-shadow: 0 4px 15px rgba(255, 53, 71, 0.4);
+    margin-top: auto; /* Đẩy nút xuống dưới cùng */
+}
+.emergency-btn:active { transform: scale(0.98); }
+
+/* Telemetry */
+.metric-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 0.95rem; }
+.metric-val { font-weight: bold; font-family: monospace; color: var(--primary-color); }
+
+/* Responsive */
+@media (max-width: 992px) {
+    .grid-row-1 { 
+        grid-template-columns: 1fr; 
+        height: auto; 
+        gap: 20px;
+    }
+    .video-panel { 
+        height: 400px; /* Chiều cao cố định trên mobile/tablet */
+    }
+    .status-panel {
+        height: auto;
+        min-height: 300px;
+    }
+    .grid-row-2 { grid-template-columns: 1fr; }
+}

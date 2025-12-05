@@ -1,31 +1,69 @@
+# Hardware Configuration for LogisticsBot (Raspberry Pi 4 Version)
+# Raspberry Pi 4 + Arduino Uno
+# Features: Auto Mode, Obstacle Avoidance, Visual Odometry
+
+# Control Mode
 control_mode: 'arduino'
 
+# Arduino Configuration
 arduino:
-  port: '/dev/ttyACM0' # Hoặc /dev/serial0 tùy bạn
+  port: '/dev/ttyACM0'      # Cổng USB của Arduino (ttyACM0 cho Pi4)
   baudrate: 115200
 
+# Robot Physical Parameters
+robot:
+  wheel_diameter: 0.065     # 65mm wheels
+  wheel_base: 0.15          # 150mm
+
+# Safety Limits
+safety:
+  min_safe_distance: 25.0    # cm
+  timeout: 5.0
+
+# Sensor Configuration
 sensors:
   camera:
-    picamera2:
-      format: 'BGR888' # Nhớ là BGR
-      buffer_count: 4
-      controls:
-        FrameRate: 30
+    # Pi 4 có thể dùng:
+    # - USB webcam
+    # - PiCamera V1/V2 qua legacy driver
+    # - HOẶC Picamera2 (nhưng hiệu năng thấp hơn Pi5)
+    backend: 'opencv'         # Dùng OpenCV VideoCapture (ổn định)
+    index: 0                  # /dev/video0
+    resolution: [320, 240]
+    fps: 30                   # Pi4 chịu được 30fps ổn
+    auto_exposure: true
+    auto_white_balance: true
 
+# Lane Following Settings (PID)
 lane_following:
+  enabled: true
   pid:
     kp: 0.8
     ki: 0.0
     kd: 0.3
-    min_output: -255
     max_output: 255
+    min_output: -255
+    derivative_smoothing: 0.7
   base_speed: 150
   max_speed: 255
   min_speed: 60
 
+# AI & Computer Vision Settings
 ai:
   lane_detection:
     roi_top_ratio: 0.5
+    roi_bottom_ratio: 1.0
+    canny_low: 50
+    canny_high: 150
     hough_threshold: 20
     min_line_length: 30
     max_line_gap: 20
+    blur_kernel: 5
+
+# Visual Odometry
+visual_odometry:
+  enabled: true
+  scale_factor: 0.23776
+  max_features: 200
+  quality_level: 0.01
+  min_distance: 10
