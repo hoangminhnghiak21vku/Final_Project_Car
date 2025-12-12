@@ -38,7 +38,7 @@ class ObjectDetector:
         # 1. Đưa vào AI (YOLO)
         # Vì Camera đang gửi RGB, và YOLO cũng cần RGB, nên ta ĐƯA THẲNG VÀO.
         # KHÔNG dùng cvtColor ở đây nữa.
-        results = self.model(frame, imgsz=640, conf=self.conf_threshold, verbose=False)
+        results = self.model(frame, imgsz=320, conf=self.conf_threshold, verbose=False)
         
         # 2. Vẽ khung hình
         # plot() trả về ảnh RGB

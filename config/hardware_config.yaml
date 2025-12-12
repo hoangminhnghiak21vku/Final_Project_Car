@@ -27,7 +27,7 @@ sensors:
     # - USB webcam
     # - PiCamera V1/V2 qua legacy driver
     # - HOẶC Picamera2 (nhưng hiệu năng thấp hơn Pi5)
-    backend: 'opencv'         # Dùng OpenCV VideoCapture (ổn định)
+    backend: 'picamera2'         # Dùng OpenCV VideoCapture (ổn định)
     index: 0                  # /dev/video0
     resolution: [320, 240]
     fps: 30                   # Pi4 chịu được 30fps ổn
@@ -60,10 +60,3 @@ ai:
     max_line_gap: 20
     blur_kernel: 5
 
-# Visual Odometry
-visual_odometry:
-  enabled: true
-  scale_factor: 0.23776
-  max_features: 200
-  quality_level: 0.01
-  min_distance: 10

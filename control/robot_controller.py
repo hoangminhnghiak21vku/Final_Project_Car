@@ -223,8 +223,8 @@ class AutoModeController:
         
         self.detection_config = robot_controller.config.get('ai', {}).get('lane_detection', {})
         self.lane_lost_count = 0
-        self.DIST_EXECUTE = 170
-        self.DIST_PREPARE = 140
+        self.DIST_EXECUTE = 120
+        self.DIST_PREPARE = 70
         self.base_speed = self.robot.current_speed
         self.default_speed = self.base_speed
 
