@@ -5,7 +5,7 @@ __pycache__/
 # Virtual environments
 venv/
 env/
-
+.venv/ 
 # YOLO datasets and weights
 runs/
 dataset/
@@ -14,7 +14,8 @@ models/
 
 # Logs
 *.log
-
+*.tgz 
+Python-3.11.8/
 # Build files
 build/
 dist/
