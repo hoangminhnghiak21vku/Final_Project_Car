@@ -29,7 +29,7 @@ sensors:
     # - HOẶC Picamera2 (nhưng hiệu năng thấp hơn Pi5)
     backend: 'picamera2'         # Dùng OpenCV VideoCapture (ổn định)
     index: 0                  # /dev/video0
-    resolution: [320, 240]
+    resolution: [800, 600]
     fps: 30                   # Pi4 chịu được 30fps ổn
     auto_exposure: true
     auto_white_balance: true
@@ -38,25 +38,25 @@ sensors:
 lane_following:
   enabled: true
   pid:
-    kp: 0.8
+    kp: 0.2
     ki: 0.0
-    kd: 0.3
+    kd: 0.05
     max_output: 255
     min_output: -255
     derivative_smoothing: 0.7
-  base_speed: 150
+  base_speed: 100
   max_speed: 255
   min_speed: 60
 
 # AI & Computer Vision Settings
 ai:
   lane_detection:
-    roi_top_ratio: 0.5
+    roi_top_ratio: 0.15
     roi_bottom_ratio: 1.0
-    canny_low: 50
-    canny_high: 150
-    hough_threshold: 20
-    min_line_length: 30
-    max_line_gap: 20
+    canny_low: 55
+    canny_high: 140
+    hough_threshold: 15
+    min_line_length: 50
+    max_line_gap: 45
     blur_kernel: 5
 
